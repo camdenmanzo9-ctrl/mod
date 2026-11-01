@@ -1,6 +1,7 @@
 package com.snowy.balancehud;
 
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
 import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
@@ -10,13 +11,15 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
 import net.minecraft.resources.Identifier;
 
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class BalanceHudClient implements ClientModInitializer {
     // ===== EDIT THESE =====
     static final String NAME = "2amsnowy";
-    static final int X = 8, Y = 8;               // HUD position
+    static int X = 8, Y = 8;                     // HUD position (change in game with /balhud)
     // ======================
 
     static final Pattern MONEY = Pattern.compile("\\$\\s?([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
@@ -27,6 +30,30 @@ public class BalanceHudClient implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        loadPos();
+
+        // /balhud <x> <y> | /balhud left|right|up|down [amount] | /balhud reset
+        ClientSendMessageEvents.ALLOW_COMMAND.register(cmd -> {
+            String[] a = cmd.trim().split("\\s+");
+            if (!a[0].equalsIgnoreCase("balhud")) return true;
+            try {
+                if (a.length > 1) {
+                    int amt = a.length > 2 ? Integer.parseInt(a[2]) : 10;
+                    switch (a[1].toLowerCase()) {
+                        case "reset" -> { X = 8; Y = 8; }
+                        case "left" -> X -= amt;
+                        case "right" -> X += amt;
+                        case "up" -> Y -= amt;
+                        case "down" -> Y += amt;
+                        default -> { X = Integer.parseInt(a[1]); Y = Integer.parseInt(a[2]); }
+                    }
+                    X = Math.max(0, X);
+                    Y = Math.max(0, Y);
+                    savePos();
+                }
+            } catch (Exception ignored) { }
+            return false; // don't send this command to the server
+        });
         ClientPlayConnectionEvents.JOIN.register((h, s, c) -> { balance = -1; start = -1; });
 
         // When YOU run /bal (or /balance), read the reply and update the HUD. The reply stays visible in chat.
@@ -49,6 +76,20 @@ public class BalanceHudClient implements ClientModInitializer {
         });
 
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("balancehud", "balance"), (g, dt) -> render(g));
+    }
+
+    static final Path CFG = FabricLoader.getInstance().getConfigDir().resolve("balancehud.txt");
+
+    static void loadPos() {
+        try {
+            String[] p = Files.readString(CFG).trim().split(",");
+            X = Integer.parseInt(p[0].trim());
+            Y = Integer.parseInt(p[1].trim());
+        } catch (Exception ignored) { }
+    }
+
+    static void savePos() {
+        try { Files.writeString(CFG, X + "," + Y); } catch (Exception ignored) { }
     }
 
     static Double parse(String s) {
