@@ -1,0 +1,10 @@
+{
+  "schemaVersion": 1,
+  "id": "balancehud",
+  "version": "${version}",
+  "name": "Balance HUD",
+  "description": "Auto-tracking balance HUD (client-side).",
+  "environment": "client",
+  "entrypoints": { "client": ["com.snowy.balancehud.BalanceHudClient"] },
+  "depends": { "fabricloader": ">=0.16.0", "minecraft": "~26.1", "java": ">=25", "fabric-api": "*" }
+}
