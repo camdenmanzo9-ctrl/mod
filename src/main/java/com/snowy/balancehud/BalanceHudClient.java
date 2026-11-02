@@ -40,19 +40,23 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // DonutSMP payment messages (a few wordings are accepted)
     static final String NAME_RE = "(?<name>[.\\w]{1,17})";
-    static final String AMT_RE = "\\$(?<num>[\\d,]+(?:\\.\\d+)?)\\s*(?<suf>[kKmMbBtT])?";
+    static final String AMT_RE = "\\$[\\s\\u00A0]*(?<num>[\\d,]+(?:\\.\\d+)?)\\s*(?<suf>[kKmMbBtT])?";
     static final String PRE = "^(?:\\[[^\\]]*\\]\\s*|[^\\p{L}\\p{N}.])*";
+    static Pattern rx(String s) {
+        return Pattern.compile(s.replace(" ", "[\\s\\u00A0]+"));
+    }
+
     static final Pattern[] IN = {
-        Pattern.compile(PRE + NAME_RE + " paid you " + AMT_RE),
-        Pattern.compile(PRE + NAME_RE + " sent you " + AMT_RE),
-        Pattern.compile(PRE + "You received " + AMT_RE + " from " + NAME_RE)
+        rx(PRE + NAME_RE + " paid you " + AMT_RE),
+        rx(PRE + NAME_RE + " sent you " + AMT_RE),
+        rx(PRE + "You received " + AMT_RE + " from " + NAME_RE)
     };
     static final Pattern[] OUT = {
-        Pattern.compile(PRE + "You paid " + NAME_RE + " " + AMT_RE),
-        Pattern.compile(PRE + "You sent " + AMT_RE + " to " + NAME_RE)
+        rx(PRE + "You paid " + NAME_RE + " " + AMT_RE),
+        rx(PRE + "You sent " + AMT_RE + " to " + NAME_RE)
     };
 
-    static final Pattern MONEY = Pattern.compile("\\$\\s?([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
+    static final Pattern MONEY = Pattern.compile("\\$[\\s\\u00A0]*([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
     static double balance = -1, start = -1;
     static boolean awaiting = false;
     static long requestedAt = 0;
