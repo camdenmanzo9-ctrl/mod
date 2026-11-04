@@ -39,6 +39,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static final List<Double> HISTORY = new ArrayList<>();           // running profit after each payment
     record Bet(String name, double amount, long ts) {}                  // amount: + = they paid you (they lost), - = you paid them (they won)
     static final List<Bet> RECENT = new ArrayList<>();                // newest first
+    static final Map<String, Double> RAKE_BASE = new LinkedHashMap<>();   // loss already "paid out" per player (set by /rake)
 
     // auctions: viewers "bid" by paying you; the biggest single payment while the timer runs wins
     record Auc(String item, String winner, double amount, long ts) {}
@@ -87,6 +88,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
         // Commands typed by you (never sent to the server):
         //  /auclog start 60 Item | end | time 90 | clear   /auchud x y
+        //  /rake remove Name | clear   (resets only rakeback)
         //  /profit [profit|bets|nets|auto|rake|auction|balance|hide|show|reset|clear]
         //  /hudscale 0.75, /balhud, /profithud, /rakehud   <x> <y> | left|right|up|down [amt] | reset
         //  /nets <name> <amount> | set <name> <amount> | remove <name> | clear
@@ -98,6 +100,7 @@ public class BalanceHudClient implements ClientModInitializer {
                     case "profithud" -> move(PROFIT_POS, PROFIT_D, a);
                     case "profitpage" -> pinned = a.length > 1 && a[1].matches("[1-3]") ? Integer.parseInt(a[1]) - 1 : -1;
                     case "rakehud" -> move(RAKE_POS, RAKE_D, a);
+                    case "rake" -> rakeCmd(a);
                     case "auchud" -> move(AUC_POS, AUC_D, a);
                     case "profit" -> {
                         if (a.length < 2) {
@@ -182,6 +185,8 @@ public class BalanceHudClient implements ClientModInitializer {
         String key = name;
         for (String n : NETS.keySet()) if (n.equalsIgnoreCase(name)) { key = n; break; }
         NETS.merge(key, in ? -v : v, Double::sum);
+        double lossNow = -NETS.get(key);
+        if (lossNow < RAKE_BASE.getOrDefault(key, 0.0)) RAKE_BASE.put(key, Math.max(0, lossNow));
         if (in && aucActive && v > aucTopAmt) { aucTopAmt = v; aucTopName = name; }
         if (in) IN_TOTAL += v; else OUT_TOTAL += v;
         if (balance >= 0) balance += in ? v : -v;   // keep the balance box in step with every payment
@@ -207,6 +212,22 @@ public class BalanceHudClient implements ClientModInitializer {
             Files.writeString(LOG, text + "\n", java.nio.file.StandardOpenOption.CREATE,
                     java.nio.file.StandardOpenOption.APPEND);
         } catch (Exception ignored) { }
+    }
+
+    // ---------- rakeback reset ----------
+    static void rakeCmd(String[] a) {
+        if (a.length < 2) return;
+        String k = a[1].toLowerCase();
+        boolean all = k.equals("clear") || (k.equals("reset") && a.length < 3);
+        if (all) {
+            for (Map.Entry<String, Double> e : NETS.entrySet())
+                if (e.getValue() < 0) RAKE_BASE.put(e.getKey(), -e.getValue());
+            return;
+        }
+        if ((k.equals("remove") || k.equals("reset")) && a.length > 2) {
+            for (Map.Entry<String, Double> e : NETS.entrySet())
+                if (e.getKey().equalsIgnoreCase(a[2]) && e.getValue() < 0) RAKE_BASE.put(e.getKey(), -e.getValue());
+        }
     }
 
     // ---------- auctions ----------
@@ -263,10 +284,11 @@ public class BalanceHudClient implements ClientModInitializer {
     static void edit(Map<String, Double> m, String[] a) {
         if (a.length < 2) return;
         String k = a[1].toLowerCase();
-        if (k.equals("clear")) { m.clear(); RECENT.clear(); return; }   // players only: In, Out and profit are NOT touched
+        if (k.equals("clear")) { m.clear(); RECENT.clear(); RAKE_BASE.clear(); return; }   // players only: In, Out and profit are NOT touched
         if (k.equals("remove") && a.length > 2) {
             String who = a[2];
             m.keySet().removeIf(n -> n.equalsIgnoreCase(who));
+            RAKE_BASE.keySet().removeIf(n -> n.equalsIgnoreCase(who));
             return;
         }
         boolean set = k.equals("set");
@@ -311,6 +333,7 @@ public class BalanceHudClient implements ClientModInitializer {
         sb.append("tot,").append(IN_TOTAL).append(',').append(OUT_TOTAL).append('\n');
         sb.append("base,").append(PROFIT_BASE).append('\n');
         for (double h : HISTORY) sb.append("hist,").append(h).append('\n');
+        RAKE_BASE.forEach((n, v) -> sb.append("rbase,").append(n).append(',').append(v).append('\n'));
         sb.append("pos,auc,").append(AUC_POS[0]).append(',').append(AUC_POS[1]).append('\n');
         for (Auc au : AUC_LOG) sb.append("auc,").append(au.item().replace(',', ';')).append(',').append(au.winner())
                 .append(',').append(au.amount()).append(',').append(au.ts()).append('\n');
@@ -342,6 +365,7 @@ public class BalanceHudClient implements ClientModInitializer {
                         case "scale" -> SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(p[1])));
                         case "net" -> NETS.put(p[1], Double.parseDouble(p[2]));
                         case "tot" -> { IN_TOTAL = Double.parseDouble(p[1]); OUT_TOTAL = Double.parseDouble(p[2]); }
+                        case "rbase" -> RAKE_BASE.put(p[1], Double.parseDouble(p[2]));
                         case "base" -> PROFIT_BASE = Double.parseDouble(p[1]);
                         case "hist" -> HISTORY.add(Double.parseDouble(p[1]));
                         case "rec" -> RECENT.add(new Bet(p[1], Double.parseDouble(p[2]), p.length > 3 ? Long.parseLong(p[3]) : System.currentTimeMillis()));
@@ -744,7 +768,8 @@ public class BalanceHudClient implements ClientModInitializer {
     static void renderRake(GuiGraphicsExtractor g, Font f) {
         List<Map.Entry<String, Double>> rows = new ArrayList<>();
         for (Map.Entry<String, Double> e : NETS.entrySet())
-            if (e.getValue() < 0) rows.add(Map.entry(e.getKey(), -e.getValue()));
+            if (e.getValue() < 0 && -e.getValue() - RAKE_BASE.getOrDefault(e.getKey(), 0.0) > 0)
+                rows.add(Map.entry(e.getKey(), -e.getValue() - RAKE_BASE.getOrDefault(e.getKey(), 0.0)));
         if (rows.isEmpty()) return;
         rows.sort(Map.Entry.<String, Double>comparingByValue().reversed());
         if (rows.size() > 7) rows = rows.subList(0, 7);
