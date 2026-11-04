@@ -34,6 +34,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static final int[] PROFIT_POS = {-1, 8}, PROFIT_D = {-1, 8};   // x = -1 means "stick to the right edge"
     static final int[] RAKE_POS = {8, 68}, RAKE_D = {8, 68};
     static final Map<String, Double> NETS = new LinkedHashMap<>();
+    static double PROFIT_BASE = 0;                                    // set by /profit reset: the profit shown = In - Out - this
     static double IN_TOTAL = 0, OUT_TOTAL = 0;                       // money paid to you / paid out by you
     static final List<Double> HISTORY = new ArrayList<>();           // running profit after each payment
     record Bet(String name, double amount, long ts) {}                  // amount: + = they paid you (they lost), - = you paid them (they won)
@@ -86,7 +87,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
         // Commands typed by you (never sent to the server):
         //  /auclog start 60 Item | end | time 90 | clear   /auchud x y
-        //  /profit reset
+        //  /profit [profit|bets|nets|auto|rake|auction|balance|hide|show|reset|clear]
         //  /hudscale 0.75, /balhud, /profithud, /rakehud   <x> <y> | left|right|up|down [amt] | reset
         //  /nets <name> <amount> | set <name> <amount> | remove <name> | clear
         ClientSendMessageEvents.ALLOW_COMMAND.register(cmd -> {
@@ -99,14 +100,25 @@ public class BalanceHudClient implements ClientModInitializer {
                     case "rakehud" -> move(RAKE_POS, RAKE_D, a);
                     case "auchud" -> move(AUC_POS, AUC_D, a);
                     case "profit" -> {
-                        if (a.length < 2 || !a[1].equalsIgnoreCase("reset")) return true;
-                        IN_TOTAL = 0;
-                        OUT_TOTAL = 0;
-                        HISTORY.clear();
+                        if (a.length < 2) {
+                            profitHidden = !profitHidden;
+                        } else {
+                            switch (a[1].toLowerCase()) {
+                                case "reset" -> { PROFIT_BASE = IN_TOTAL - OUT_TOTAL; HISTORY.clear(); }
+                                case "clear", "resetall" -> { IN_TOTAL = 0; OUT_TOTAL = 0; PROFIT_BASE = 0; HISTORY.clear(); }
+                                case "profit" -> { pinned = 0; profitHidden = false; }
+                                case "bets" -> { pinned = 1; profitHidden = false; }
+                                case "nets" -> { pinned = 2; profitHidden = false; }
+                                case "auto" -> { pinned = -1; profitHidden = false; }
+                                case "rake" -> rakeHidden = !rakeHidden;
+                                case "auction" -> aucHidden = !aucHidden;
+                                case "balance" -> balHidden = !balHidden;
+                                case "hide" -> { balHidden = true; profitHidden = true; rakeHidden = true; aucHidden = true; }
+                                case "show" -> { balHidden = false; profitHidden = false; rakeHidden = false; aucHidden = false; }
+                                default -> { return true; }
+                            }
+                        }
                     }
-                    case "auclog" -> auctionCmd(a);
-                    case "hudscale" -> { if (a.length > 1) SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(a[1]))); }
-                    case "nets" -> edit(NETS, a);
                     default -> { return true; }
                 }
                 save();
@@ -172,7 +184,8 @@ public class BalanceHudClient implements ClientModInitializer {
         NETS.merge(key, in ? -v : v, Double::sum);
         if (in && aucActive && v > aucTopAmt) { aucTopAmt = v; aucTopName = name; }
         if (in) IN_TOTAL += v; else OUT_TOTAL += v;
-        HISTORY.add(IN_TOTAL - OUT_TOTAL);
+        if (balance >= 0) balance += in ? v : -v;   // keep the balance box in step with every payment
+        HISTORY.add(IN_TOTAL - OUT_TOTAL - PROFIT_BASE);
         while (HISTORY.size() > 150) HISTORY.remove(0);
         RECENT.add(0, new Bet(name, in ? v : -v, System.currentTimeMillis()));
         while (RECENT.size() > 12) RECENT.remove(RECENT.size() - 1);
@@ -182,6 +195,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // Lines with a $ that we did NOT recognise are saved here, so the wording can be checked.
     static int pinned = -1;   // -1 = pages rotate by themselves
+    static boolean balHidden = false, profitHidden = false, rakeHidden = false, aucHidden = false;
 
     static String lastLogged = "";
 
@@ -249,7 +263,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static void edit(Map<String, Double> m, String[] a) {
         if (a.length < 2) return;
         String k = a[1].toLowerCase();
-        if (k.equals("clear")) { m.clear(); RECENT.clear(); IN_TOTAL = 0; OUT_TOTAL = 0; HISTORY.clear(); return; }
+        if (k.equals("clear")) { m.clear(); RECENT.clear(); return; }   // players only: In, Out and profit are NOT touched
         if (k.equals("remove") && a.length > 2) {
             String who = a[2];
             m.keySet().removeIf(n -> n.equalsIgnoreCase(who));
@@ -295,6 +309,7 @@ public class BalanceHudClient implements ClientModInitializer {
         sb.append("pos,bal,").append(BAL[0]).append(',').append(BAL[1]).append('\n');
         sb.append("pos,profit,").append(PROFIT_POS[0]).append(',').append(PROFIT_POS[1]).append('\n');
         sb.append("tot,").append(IN_TOTAL).append(',').append(OUT_TOTAL).append('\n');
+        sb.append("base,").append(PROFIT_BASE).append('\n');
         for (double h : HISTORY) sb.append("hist,").append(h).append('\n');
         sb.append("pos,auc,").append(AUC_POS[0]).append(',').append(AUC_POS[1]).append('\n');
         for (Auc au : AUC_LOG) sb.append("auc,").append(au.item().replace(',', ';')).append(',').append(au.winner())
@@ -327,6 +342,7 @@ public class BalanceHudClient implements ClientModInitializer {
                         case "scale" -> SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(p[1])));
                         case "net" -> NETS.put(p[1], Double.parseDouble(p[2]));
                         case "tot" -> { IN_TOTAL = Double.parseDouble(p[1]); OUT_TOTAL = Double.parseDouble(p[2]); }
+                        case "base" -> PROFIT_BASE = Double.parseDouble(p[1]);
                         case "hist" -> HISTORY.add(Double.parseDouble(p[1]));
                         case "rec" -> RECENT.add(new Bet(p[1], Double.parseDouble(p[2]), p.length > 3 ? Long.parseLong(p[3]) : System.currentTimeMillis()));
                         default -> { }
@@ -474,10 +490,10 @@ public class BalanceHudClient implements ClientModInitializer {
         Font f = mc.font;
         g.pose().pushMatrix();
         g.pose().scale(SCALE, SCALE);
-        renderBalance(g, f);
-        renderProfit(g, f);
-        renderRake(g, f);
-        renderAuction(g, f);
+        if (!balHidden) renderBalance(g, f);
+        if (!profitHidden) renderProfit(g, f);
+        if (!rakeHidden) renderRake(g, f);
+        if (!aucHidden) renderAuction(g, f);
         g.pose().popMatrix();
     }
 
@@ -553,7 +569,7 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     static void profitPage(GuiGraphicsExtractor g, Font f, int x, int y, int w) {
-        double profit = IN_TOTAL - OUT_TOTAL;
+        double profit = IN_TOTAL - OUT_TOTAL - PROFIT_BASE;
         int pc = profit >= 0 ? GREEN : RED;
         spaced(g, f, "PROFIT", x + 8, y + 7, TITLE);
 
