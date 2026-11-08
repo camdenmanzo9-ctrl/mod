@@ -44,15 +44,6 @@ public class BalanceHudClient implements ClientModInitializer {
     static final List<Bet> RECENT = new ArrayList<>();                // newest first
     static final Map<String, Double> RAKE_BASE = new LinkedHashMap<>();   // loss already "paid out" per player (set by /rake)
 
-    // auctions: viewers "bid" by paying you; the biggest single payment while the timer runs wins
-    record Auc(String item, String winner, double amount, long ts) {}
-    static final List<Auc> AUC_LOG = new ArrayList<>();              // finished auctions, newest first
-    static boolean aucActive = false;
-    static String aucItem = "";
-    static long aucEnd = 0, aucDur = 60_000, aucDefault = 60_000;
-    static String aucTopName = null;
-    static double aucTopAmt = 0;
-    static final int[] AUC_POS = {196, 8}, AUC_D = {196, 8};
 
     // DonutSMP payment messages (a few wordings are accepted)
     static final String NAME_RE = "(?<name>[.\\w]{1,17})";
@@ -74,7 +65,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     static final Pattern MONEY = Pattern.compile("\\$[\\s\\u00A0]*([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
     static int BAL_W = 0;   // extra width for the balance box (/balwidth)
-    static float BAL_SCALE = 1f, PROFIT_SCALE = 1f, RAKE_SCALE = 1f, AUC_SCALE = 1f;   // per-panel size on top of /hudscale
+    static float BAL_SCALE = 1f, PROFIT_SCALE = 1f, RAKE_SCALE = 1f;   // per-panel size on top of /hudscale
     static float SCALE = 0.65f;   // overall size of all panels (change in game with /hudscale 0.5 ... 1.5)
 
     // Poppins font (files live in assets/balancehud/font/)
@@ -125,11 +116,10 @@ public class BalanceHudClient implements ClientModInitializer {
         load();
 
         // Commands typed by you (never sent to the server):
-        //  /auclog start 60 Item | end | time 90 | clear   /auchud x y
         //  /rake remove Name | clear   (resets only rakeback)
-        //  /profit [profit|bets|nets|auto|rake|auction|balance|hide|show|reset|clear]
+        //  /profit [profit|bets|nets|auto|rake|balance|hide|show|reset|clear]
         //  /balwidth 60  (make the balance box longer)
-        //  /profitscale 0.8  /balscale  /rakescale  /aucscale   (size of one panel)
+        //  /profitscale 0.8  /balscale  /rakescale   (size of one panel)
         //  /hudscale 0.75, /balhud, /profithud, /rakehud   <x> <y> | left|right|up|down [amt] | reset
         //  /nets <name> <amount> | set <name> <amount> | remove <name> | clear
         ClientSendMessageEvents.ALLOW_COMMAND.register(cmd -> {
@@ -141,15 +131,12 @@ public class BalanceHudClient implements ClientModInitializer {
                     case "profitpage" -> pinned = a.length > 1 && a[1].matches("[1-3]") ? Integer.parseInt(a[1]) - 1 : -1;
                     case "rakehud" -> move(RAKE_POS, RAKE_D, a);
                     case "rake" -> rakeCmd(a);
-                    case "auchud" -> move(AUC_POS, AUC_D, a);
                     case "nets" -> edit(NETS, a);
-                    case "auclog" -> auctionCmd(a);
                     case "hudscale" -> { if (a.length > 1) SCALE = cl(Float.parseFloat(a[1])); }
                     case "balwidth" -> { if (a.length > 1) BAL_W = Math.max(0, Math.min(600, Integer.parseInt(a[1]))); }
                     case "balscale" -> { if (a.length > 1) BAL_SCALE = cl(Float.parseFloat(a[1])); }
                     case "profitscale" -> { if (a.length > 1) PROFIT_SCALE = cl(Float.parseFloat(a[1])); }
                     case "rakescale" -> { if (a.length > 1) RAKE_SCALE = cl(Float.parseFloat(a[1])); }
-                    case "aucscale" -> { if (a.length > 1) AUC_SCALE = cl(Float.parseFloat(a[1])); }
                     case "profit" -> {
                         if (a.length < 2) {
                             profitHidden = !profitHidden;
@@ -162,10 +149,9 @@ public class BalanceHudClient implements ClientModInitializer {
                                 case "nets" -> { pinned = 2; profitHidden = false; }
                                 case "auto" -> { pinned = -1; profitHidden = false; }
                                 case "rake" -> rakeHidden = !rakeHidden;
-                                case "auction" -> aucHidden = !aucHidden;
                                 case "balance" -> balHidden = !balHidden;
-                                case "hide" -> { balHidden = true; profitHidden = true; rakeHidden = true; aucHidden = true; }
-                                case "show" -> { balHidden = false; profitHidden = false; rakeHidden = false; aucHidden = false; }
+                                case "hide" -> { balHidden = true; profitHidden = true; rakeHidden = true; }
+                                case "show" -> { balHidden = false; profitHidden = false; rakeHidden = false; }
                                 default -> { return true; }
                             }
                         }
@@ -234,7 +220,6 @@ public class BalanceHudClient implements ClientModInitializer {
         NETS.merge(key, in ? -v : v, Double::sum);
         double lossNow = -NETS.get(key);
         if (lossNow < RAKE_BASE.getOrDefault(key, 0.0)) RAKE_BASE.put(key, Math.max(0, lossNow));
-        if (in && aucActive && v > aucTopAmt) { aucTopAmt = v; aucTopName = name; }
         if (in) IN_TOTAL += v; else OUT_TOTAL += v;
         if (balance >= 0) balance += in ? v : -v;   // keep the balance box in step with every payment
         HISTORY.add(IN_TOTAL - OUT_TOTAL - PROFIT_BASE);
@@ -247,7 +232,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // Lines with a $ that we did NOT recognise are saved here, so the wording can be checked.
     static int pinned = -1;   // -1 = pages rotate by themselves
-    static boolean balHidden = false, profitHidden = false, rakeHidden = false, aucHidden = false;
+    static boolean balHidden = false, profitHidden = false, rakeHidden = false;
 
     static String lastLogged = "";
 
@@ -275,40 +260,6 @@ public class BalanceHudClient implements ClientModInitializer {
             for (Map.Entry<String, Double> e : NETS.entrySet())
                 if (e.getKey().equalsIgnoreCase(a[2]) && e.getValue() < 0) RAKE_BASE.put(e.getKey(), -e.getValue());
         }
-    }
-
-    // ---------- auctions ----------
-    static void auctionCmd(String[] a) {
-        if (a.length < 2) return;
-        switch (a[1].toLowerCase()) {
-            case "start" -> {
-                int i = 2;
-                long secs = aucDefault / 1000;
-                if (a.length > 2 && a[2].matches("\\d+")) { secs = Long.parseLong(a[2]); i = 3; }
-                StringBuilder sb = new StringBuilder();
-                for (; i < a.length; i++) {
-                    if (sb.length() > 0) sb.append(' ');
-                    sb.append(a[i]);
-                }
-                aucItem = sb.length() == 0 ? "Auction" : sb.toString();
-                aucDur = Math.max(1, secs) * 1000;
-                aucEnd = System.currentTimeMillis() + aucDur;
-                aucTopName = null;
-                aucTopAmt = 0;
-                aucActive = true;
-            }
-            case "end" -> { if (aucActive) endAuction(); }
-            case "time" -> { if (a.length > 2) aucDefault = Math.max(1, Long.parseLong(a[2])) * 1000; }
-            case "clear" -> { aucActive = false; AUC_LOG.clear(); }
-            default -> { }
-        }
-    }
-
-    static void endAuction() {
-        aucActive = false;
-        AUC_LOG.add(0, new Auc(aucItem, aucTopName == null ? "-" : aucTopName, aucTopAmt, System.currentTimeMillis()));
-        while (AUC_LOG.size() > 20) AUC_LOG.remove(AUC_LOG.size() - 1);
-        save();
     }
 
     // ---------- commands ----------
@@ -377,16 +328,13 @@ public class BalanceHudClient implements ClientModInitializer {
         sb.append("balw,").append(BAL_W).append('\n');
         sb.append("balance,").append(balance).append('\n');
         sb.append("scale,").append(SCALE).append('\n');
-        sb.append("scales,").append(BAL_SCALE).append(',').append(PROFIT_SCALE).append(',').append(RAKE_SCALE).append(',').append(AUC_SCALE).append('\n');
+        sb.append("scales,").append(BAL_SCALE).append(',').append(PROFIT_SCALE).append(',').append(RAKE_SCALE).append('\n');
         sb.append("pos,bal,").append(BAL[0]).append(',').append(BAL[1]).append('\n');
         sb.append("pos,profit,").append(PROFIT_POS[0]).append(',').append(PROFIT_POS[1]).append('\n');
         sb.append("tot,").append(IN_TOTAL).append(',').append(OUT_TOTAL).append('\n');
         sb.append("base,").append(PROFIT_BASE).append('\n');
         for (double h : HISTORY) sb.append("hist,").append(h).append('\n');
         RAKE_BASE.forEach((n, v) -> sb.append("rbase,").append(n).append(',').append(v).append('\n'));
-        sb.append("pos,auc,").append(AUC_POS[0]).append(',').append(AUC_POS[1]).append('\n');
-        for (Auc au : AUC_LOG) sb.append("auc,").append(au.item().replace(',', ';')).append(',').append(au.winner())
-                .append(',').append(au.amount()).append(',').append(au.ts()).append('\n');
         sb.append("pos,rake,").append(RAKE_POS[0]).append(',').append(RAKE_POS[1]).append('\n');
         for (Bet b : RECENT) sb.append("rec,").append(b.name()).append(',').append(b.amount()).append(',').append(b.ts()).append('\n');
         NETS.forEach((n, v) -> sb.append("net,").append(n).append(',').append(v).append('\n'));
@@ -405,18 +353,16 @@ public class BalanceHudClient implements ClientModInitializer {
                     }
                     switch (p[0]) {
                         case "pos" -> {
-                            int[] t = p[1].equals("bal") ? BAL : p[1].equals("profit") ? PROFIT_POS : p[1].equals("rake") ? RAKE_POS : p[1].equals("auc") ? AUC_POS : null;
+                            int[] t = p[1].equals("bal") ? BAL : p[1].equals("profit") ? PROFIT_POS : p[1].equals("rake") ? RAKE_POS : null;
                             if (t != null) {
                                 t[0] = Integer.parseInt(p[2]);
                                 t[1] = Integer.parseInt(p[3]);
                             }
                         }
-                        case "auc" -> AUC_LOG.add(new Auc(p[1], p[2], Double.parseDouble(p[3]), Long.parseLong(p[4])));
                         case "scales" -> {
                             BAL_SCALE = cl(Float.parseFloat(p[1]));
                             PROFIT_SCALE = cl(Float.parseFloat(p[2]));
                             RAKE_SCALE = cl(Float.parseFloat(p[3]));
-                            AUC_SCALE = cl(Float.parseFloat(p[4]));
                         }
                         case "balw" -> BAL_W = Math.max(0, Math.min(600, Integer.parseInt(p[1])));
                         case "balance" -> balance = Double.parseDouble(p[1]);
@@ -575,7 +521,6 @@ public class BalanceHudClient implements ClientModInitializer {
         if (!balHidden) { begin(g, BAL[0], BAL[1], BAL_SCALE); renderBalance(g, f); end(g); }
         if (!profitHidden) renderProfit(g, f);
         if (!rakeHidden) { begin(g, RAKE_POS[0], RAKE_POS[1], RAKE_SCALE); renderRake(g, f); end(g); }
-        if (!aucHidden) { begin(g, AUC_POS[0], AUC_POS[1], AUC_SCALE); renderAuction(g, f); end(g); }
         g.pose().popMatrix();
     }
 
@@ -766,59 +711,6 @@ public class BalanceHudClient implements ClientModInitializer {
             tx(g, f, fit(f, e.getKey(), w - 24 - tw(f, t)), x + 8, ry, WHITE, false);
             tx(g, f, t, x + w - 8 - tw(f, t), ry, e.getValue() >= 0 ? GREEN : RED, false);
             ry += 14;
-        }
-    }
-
-    // ---- auction log ----
-    static void renderAuction(GuiGraphicsExtractor g, Font f) {
-        long now = System.currentTimeMillis();
-        if (aucActive && now >= aucEnd) endAuction();
-        if (!aucActive && AUC_LOG.isEmpty()) return;
-        int w = 190;
-        int x = AUC_POS[0], y = AUC_POS[1];
-        int rows = Math.min(5, AUC_LOG.size());
-        int h = 22 + (aucActive ? 46 : 0) + (rows > 0 ? 12 + rows * 20 : 0) + 6;
-        panel(g, x, y, w, h);
-        spaced(g, f, "AUCTIONS", x + 8, y + 7, TITLE);
-        int ry = y + 22;
-
-        if (aucActive) {
-            long left = Math.max(0, aucEnd - now);
-            String t = String.format("%d:%02d", left / 60000, (left / 1000) % 60);
-            tx(g, f, fit(f, aucItem, w - 70), x + 8, ry + 1, WHITE, false);
-            g.pose().pushMatrix();
-            g.pose().translate(x + w - 8 - (int) (tw(f, t) * 1.5f), ry - 1);
-            g.pose().scale(1.5f, 1.5f);
-            tx(g, f, t, 0, 0, PINK, false);
-            g.pose().popMatrix();
-            int by = ry + 14;
-            g.fill(x + 8, by, x + w - 8, by + 2, 0x28FFFFFF);
-            g.fill(x + 8, by, x + 8 + (int) ((w - 16) * (left / (double) aucDur)), by + 2, PINK);
-            small(g, f, "TOP BID", x + 8, ry + 20, MUTED);
-            if (aucTopName == null) {
-                tx(g, f, "No bids yet", x + 8, ry + 29, MUTED, false);
-            } else {
-                String amt = money2(aucTopAmt);
-                tx(g, f, amt, x + w - 8 - tw(f, amt), ry + 29, GREEN, false);
-                tx(g, f, fit(f, aucTopName, w - 24 - tw(f, amt)), x + 8, ry + 29, WHITE, false);
-            }
-            ry += 46;
-        }
-
-        if (rows > 0) {
-            small(g, f, "PAST AUCTIONS", x + 8, ry, MUTED);
-            ry += 11;
-            for (int i = 0; i < rows; i++) {
-                Auc au = AUC_LOG.get(i);
-                boolean sold = au.amount() > 0;
-                String amt = sold ? money2(au.amount()) : "no bids";
-                tx(g, f, fit(f, au.item(), w - 24 - tw(f, amt)), x + 8, ry, WHITE, false);
-                tx(g, f, amt, x + w - 8 - tw(f, amt), ry, sold ? GREEN : MUTED, false);
-                String t = ago(au.ts());
-                small(g, f, sold ? "won by " + au.winner() : "ended", x + 8, ry + 10, MUTED);
-                small(g, f, t, x + w - 8 - (int) (tw(f, t) * 0.7f), ry + 10, MUTED);
-                ry += 20;
-            }
         }
     }
 
