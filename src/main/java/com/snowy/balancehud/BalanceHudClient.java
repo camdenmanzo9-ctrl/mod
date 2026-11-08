@@ -9,6 +9,9 @@ import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphicsExtractor;
+import net.minecraft.network.chat.Component;
+import net.minecraft.network.chat.FontDescription;
+import net.minecraft.network.chat.Style;
 import net.minecraft.resources.Identifier;
 
 import java.nio.file.Files;
@@ -70,7 +73,41 @@ public class BalanceHudClient implements ClientModInitializer {
     };
 
     static final Pattern MONEY = Pattern.compile("\\$[\\s\\u00A0]*([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
+    static float BAL_SCALE = 1f, PROFIT_SCALE = 1f, RAKE_SCALE = 1f, AUC_SCALE = 1f;   // per-panel size on top of /hudscale
     static float SCALE = 0.65f;   // overall size of all panels (change in game with /hudscale 0.5 ... 1.5)
+
+    // Poppins font (files live in assets/balancehud/font/)
+    static final FontDescription FD_MED = new FontDescription.Resource(Identifier.fromNamespaceAndPath("balancehud", "hud"));
+    static final FontDescription FD_BOLD = FD_MED;   // one font file only (Poppins Medium) to keep the setup short
+
+    static final boolean USE_FONT = true;   // false = use Minecraft's own font (no font files needed)
+
+    static Component fnt(String s) {
+        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_MED)) : Component.literal(s);
+    }
+
+    static Component fntB(String s) {
+        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_BOLD)) : Component.literal(s);
+    }
+    static int tw(Font f, String s) { return f.width(fnt(s)); }
+    static void tx(GuiGraphicsExtractor g, Font f, String s, int x, int y, int color, boolean shadow) {
+        g.text(f, fnt(s), x, y, color, shadow);
+    }
+    static void txb(GuiGraphicsExtractor g, Font f, String s, int x, int y, int color) {
+        g.text(f, fntB(s), x, y, color, false);
+    }
+
+    static float cl(float v) { return Math.max(0.4f, Math.min(1.5f, v)); }
+
+    // scale one panel around its own top-left corner
+    static void begin(GuiGraphicsExtractor g, int x, int y, float m) {
+        g.pose().pushMatrix();
+        g.pose().translate(x, y);
+        g.pose().scale(m, m);
+        g.pose().translate(-x, -y);
+    }
+
+    static void end(GuiGraphicsExtractor g) { g.pose().popMatrix(); }
 
     static int sw() {
         return (int) (Minecraft.getInstance().getWindow().getGuiScaledWidth() / SCALE);
@@ -80,7 +117,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static boolean awaiting = false;
     static long requestedAt = 0;
 
-    static final int TITLE = 0xFFE9A8D8, WHITE = 0xFFF2F3F7, MUTED = 0xFF9AA0AD, GREEN = 0xFF3DF08A, RED = 0xFFFF4D6D, PINK = 0xFFFF3D8B;
+    static final int TITLE = 0xFFD07DAA, WHITE = 0xFFFBFEFF, MUTED = 0xFF9EA0B4, GREEN = 0xFF59F58C, RED = 0xFFF14A7B, PINK = 0xFFF14A7B;
 
     @Override
     public void onInitializeClient() {
@@ -90,6 +127,7 @@ public class BalanceHudClient implements ClientModInitializer {
         //  /auclog start 60 Item | end | time 90 | clear   /auchud x y
         //  /rake remove Name | clear   (resets only rakeback)
         //  /profit [profit|bets|nets|auto|rake|auction|balance|hide|show|reset|clear]
+        //  /profitscale 0.8  /balscale  /rakescale  /aucscale   (size of one panel)
         //  /hudscale 0.75, /balhud, /profithud, /rakehud   <x> <y> | left|right|up|down [amt] | reset
         //  /nets <name> <amount> | set <name> <amount> | remove <name> | clear
         ClientSendMessageEvents.ALLOW_COMMAND.register(cmd -> {
@@ -102,6 +140,13 @@ public class BalanceHudClient implements ClientModInitializer {
                     case "rakehud" -> move(RAKE_POS, RAKE_D, a);
                     case "rake" -> rakeCmd(a);
                     case "auchud" -> move(AUC_POS, AUC_D, a);
+                    case "nets" -> edit(NETS, a);
+                    case "auclog" -> auctionCmd(a);
+                    case "hudscale" -> { if (a.length > 1) SCALE = cl(Float.parseFloat(a[1])); }
+                    case "balscale" -> { if (a.length > 1) BAL_SCALE = cl(Float.parseFloat(a[1])); }
+                    case "profitscale" -> { if (a.length > 1) PROFIT_SCALE = cl(Float.parseFloat(a[1])); }
+                    case "rakescale" -> { if (a.length > 1) RAKE_SCALE = cl(Float.parseFloat(a[1])); }
+                    case "aucscale" -> { if (a.length > 1) AUC_SCALE = cl(Float.parseFloat(a[1])); }
                     case "profit" -> {
                         if (a.length < 2) {
                             profitHidden = !profitHidden;
@@ -328,6 +373,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static void save() {
         StringBuilder sb = new StringBuilder();
         sb.append("scale,").append(SCALE).append('\n');
+        sb.append("scales,").append(BAL_SCALE).append(',').append(PROFIT_SCALE).append(',').append(RAKE_SCALE).append(',').append(AUC_SCALE).append('\n');
         sb.append("pos,bal,").append(BAL[0]).append(',').append(BAL[1]).append('\n');
         sb.append("pos,profit,").append(PROFIT_POS[0]).append(',').append(PROFIT_POS[1]).append('\n');
         sb.append("tot,").append(IN_TOTAL).append(',').append(OUT_TOTAL).append('\n');
@@ -362,6 +408,12 @@ public class BalanceHudClient implements ClientModInitializer {
                             }
                         }
                         case "auc" -> AUC_LOG.add(new Auc(p[1], p[2], Double.parseDouble(p[3]), Long.parseLong(p[4])));
+                        case "scales" -> {
+                            BAL_SCALE = cl(Float.parseFloat(p[1]));
+                            PROFIT_SCALE = cl(Float.parseFloat(p[2]));
+                            RAKE_SCALE = cl(Float.parseFloat(p[3]));
+                            AUC_SCALE = cl(Float.parseFloat(p[4]));
+                        }
                         case "scale" -> SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(p[1])));
                         case "net" -> NETS.put(p[1], Double.parseDouble(p[2]));
                         case "tot" -> { IN_TOTAL = Double.parseDouble(p[1]); OUT_TOTAL = Double.parseDouble(p[2]); }
@@ -424,7 +476,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // ---------- drawing ----------
     static void panel(GuiGraphicsExtractor g, int x, int y, int w, int h) {
-        int bg = 0xE00B0E16, bd = 0x553B4263;
+        int bg = 0xE5111720, bd = 0x802B374E;
         g.fill(x + 2, y, x + w - 2, y + 1, bg);
         g.fill(x + 1, y + 1, x + w - 1, y + 2, bg);
         g.fill(x, y + 2, x + w, y + h - 2, bg);
@@ -461,9 +513,9 @@ public class BalanceHudClient implements ClientModInitializer {
     static int spaced(GuiGraphicsExtractor g, Font f, String s, int x, int y, int color) {
         int cx = x;
         for (char c : s.toCharArray()) {
-            String t = String.valueOf(c);
-            g.text(f, t, cx, y, color, false);
-            cx += f.width(t) + 1;
+            String ch = String.valueOf(c);
+            txb(g, f, ch, cx, y, color);
+            cx += f.width(fntB(ch)) + 1;
         }
         return cx - x;
     }
@@ -488,13 +540,13 @@ public class BalanceHudClient implements ClientModInitializer {
         g.pose().pushMatrix();
         g.pose().translate(x, y);
         g.pose().scale(0.7f, 0.7f);
-        g.text(f, s, 0, 0, color, false);
+        tx(g, f, s, 0, 0, color, false);
         g.pose().popMatrix();
     }
 
     static String fit(Font f, String s, int maxW) {
-        if (f.width(s) <= maxW) return s;
-        while (s.length() > 1 && f.width(s + "..") > maxW) s = s.substring(0, s.length() - 1);
+        if (tw(f, s) <= maxW) return s;
+        while (s.length() > 1 && tw(f, s + "..") > maxW) s = s.substring(0, s.length() - 1);
         return s + "..";
     }
 
@@ -514,10 +566,10 @@ public class BalanceHudClient implements ClientModInitializer {
         Font f = mc.font;
         g.pose().pushMatrix();
         g.pose().scale(SCALE, SCALE);
-        if (!balHidden) renderBalance(g, f);
+        if (!balHidden) { begin(g, BAL[0], BAL[1], BAL_SCALE); renderBalance(g, f); end(g); }
         if (!profitHidden) renderProfit(g, f);
-        if (!rakeHidden) renderRake(g, f);
-        if (!aucHidden) renderAuction(g, f);
+        if (!rakeHidden) { begin(g, RAKE_POS[0], RAKE_POS[1], RAKE_SCALE); renderRake(g, f); end(g); }
+        if (!aucHidden) { begin(g, AUC_POS[0], AUC_POS[1], AUC_SCALE); renderAuction(g, f); end(g); }
         g.pose().popMatrix();
     }
 
@@ -525,13 +577,13 @@ public class BalanceHudClient implements ClientModInitializer {
     static void renderBalance(GuiGraphicsExtractor g, Font f) {
         int X = BAL[0], Y = BAL[1];
         String amount = balance < 0 ? "$---" : String.format("$%,d", (long) balance);
-        int w = Math.max(120, (int) (f.width(amount) * 1.8f) + 22);
+        int w = Math.max(120, (int) (tw(f, amount) * 1.8f) + 22);
         panel(g, X, Y, w, 48);
         spaced(g, f, NAME.toUpperCase(), X + 10, Y + 7, TITLE);
         g.pose().pushMatrix();
         g.pose().translate(X + 10, Y + 18);
         g.pose().scale(1.8f, 1.8f);
-        g.text(f, amount, 0, 0, GREEN, false);
+        txb(g, f, amount, 0, 0, GREEN);
         g.pose().popMatrix();
         spaced(g, f, "BALANCE", X + 10, Y + 37, MUTED);
     }
@@ -554,7 +606,7 @@ public class BalanceHudClient implements ClientModInitializer {
             int yy = y + (int) ((max - v) / (max - min) * (h - 1));
             int top = Math.min(yy, yz), bot = Math.max(yy, yz) + 1;
             boolean up = v >= 0;
-            g.fill(x + i, top, x + i + 1, bot, up ? 0x303DF08A : 0x30FF4D6D);
+            g.fill(x + i, top, x + i + 1, bot, up ? 0x3059F58C : 0x30F14A7B);
             g.fill(x + i, yy, x + i + 1, yy + 1, up ? GREEN : RED);
             last = yy;
         }
@@ -568,13 +620,14 @@ public class BalanceHudClient implements ClientModInitializer {
     static void renderProfit(GuiGraphicsExtractor g, Font f) {
         if (HISTORY.isEmpty() && NETS.isEmpty()) return;
         int w = 220, h = 262;
-        int x = PROFIT_POS[0] < 0 ? sw() - w - 8 : PROFIT_POS[0];
+        int x = PROFIT_POS[0] < 0 ? sw() - 8 - (int) (w * PROFIT_SCALE) : PROFIT_POS[0];
         int y = PROFIT_POS[1];
+        begin(g, x, y, PROFIT_SCALE);
         panel(g, x, y, w, h);
 
         if (balance >= 0) {
             String bt = "Bal " + money2(balance);
-            small(g, f, bt, x + w - 8 - (int) (f.width(bt) * 0.7f), y + 8, MUTED);
+            small(g, f, bt, x + w - 8 - (int) (tw(f, bt) * 0.7f), y + 8, MUTED);
         }
 
         long now = System.currentTimeMillis();
@@ -590,6 +643,7 @@ public class BalanceHudClient implements ClientModInitializer {
         int bx = x + 8 + PAGES * 8 + 6, ex = x + w - 8;
         g.fill(bx, py + 1, ex, py + 3, 0x18FFFFFF);
         g.fill(bx, py + 1, bx + (int) ((ex - bx) * prog), py + 3, PINK);
+        end(g);
     }
 
     static void profitPage(GuiGraphicsExtractor g, Font f, int x, int y, int w) {
@@ -600,15 +654,15 @@ public class BalanceHudClient implements ClientModInitializer {
         g.pose().pushMatrix();
         g.pose().translate(x + 8, y + 19);
         g.pose().scale(2f, 2f);
-        g.text(f, signed(profit), 0, 0, pc, false);
+        txb(g, f, signed(profit), 0, 0, pc);
         g.pose().popMatrix();
 
         int ry = y + 42;
-        g.text(f, "In", x + 8, ry, MUTED, false);
-        g.text(f, money2(IN_TOTAL), x + 8 + f.width("In "), ry, WHITE, false);
+        tx(g, f, "In", x + 8, ry, MUTED, false);
+        tx(g, f, money2(IN_TOTAL), x + 8 + tw(f, "In "), ry, WHITE, false);
         int ox = x + 100;
-        g.text(f, "Out", ox, ry, MUTED, false);
-        g.text(f, money2(OUT_TOTAL), ox + f.width("Out "), ry, WHITE, false);
+        tx(g, f, "Out", ox, ry, MUTED, false);
+        tx(g, f, money2(OUT_TOTAL), ox + tw(f, "Out "), ry, WHITE, false);
 
         // chart box with high / low labels, solid end tag and LIVE
         int cx = x + 8, cy = y + 57, cw = w - 16, ch = 50;
@@ -622,7 +676,7 @@ public class BalanceHudClient implements ClientModInitializer {
         small(g, f, "LIVE", x + w - 33, cy + ch + 3, PINK);
 
         String pill = signed(profit);
-        int pw = (int) (f.width(pill) * 0.7f) + 8;
+        int pw = (int) (tw(f, pill) * 0.7f) + 8;
         int ex2 = cx + cw - 3;
         g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 2, pc);
         int px = ex2 - pw - 6;
@@ -645,19 +699,19 @@ public class BalanceHudClient implements ClientModInitializer {
         int lx = x + 8, rx = x + 8 + colW + gap;
         card(g, lx, ty, colW, th, GREEN);
         card(g, rx, ty, colW, th, RED);
-        g.text(f, "TOP WINNERS", lx + 5, ty + 5, GREEN, false);
-        g.text(f, "TOP LOSERS", rx + 5, ty + 5, RED, false);
+        txb(g, f, "TOP WINNERS", lx + 5, ty + 5, GREEN);
+        txb(g, f, "TOP LOSERS", rx + 5, ty + 5, RED);
         for (int i = 0; i < 5; i++) {
             int r = ty + 19 + i * 11;
             if (i < ups.size()) {
                 String amt = money2(ups.get(i).getValue());
-                g.text(f, fit(f, ups.get(i).getKey(), colW - 14 - f.width(amt)), lx + 5, r, WHITE, false);
-                g.text(f, amt, lx + colW - 5 - f.width(amt), r, GREEN, false);
+                tx(g, f, fit(f, ups.get(i).getKey(), colW - 14 - tw(f, amt)), lx + 5, r, WHITE, false);
+                tx(g, f, amt, lx + colW - 5 - tw(f, amt), r, GREEN, false);
             }
             if (i < downs.size()) {
                 String amt = money2(downs.get(i).getValue());
-                g.text(f, fit(f, downs.get(i).getKey(), colW - 14 - f.width(amt)), rx + 5, r, WHITE, false);
-                g.text(f, amt, rx + colW - 5 - f.width(amt), r, RED, false);
+                tx(g, f, fit(f, downs.get(i).getKey(), colW - 14 - tw(f, amt)), rx + 5, r, WHITE, false);
+                tx(g, f, amt, rx + colW - 5 - tw(f, amt), r, RED, false);
             }
         }
 
@@ -668,8 +722,8 @@ public class BalanceHudClient implements ClientModInitializer {
             int r = y + 207 + i * 14;
             String amt = signed(b.amount());
             arrow(g, x + 9, r + 1, got, 0xFFBFC4D0);
-            g.text(f, fit(f, b.name(), w - 62 - f.width(amt)), x + 22, r, WHITE, false);
-            g.text(f, amt, x + w - 8 - f.width(amt), r, got ? GREEN : RED, false);
+            tx(g, f, fit(f, b.name(), w - 62 - tw(f, amt)), x + 22, r, WHITE, false);
+            tx(g, f, amt, x + w - 8 - tw(f, amt), r, got ? GREEN : RED, false);
         }
     }
 
@@ -681,15 +735,15 @@ public class BalanceHudClient implements ClientModInitializer {
             boolean lost = b.amount() >= 0;      // they paid you = they lost
             int col = lost ? RED : GREEN;
             if (i % 2 == 0) g.fill(x + 5, ry - 2, x + w - 5, ry + 12, 0x14FFFFFF);
-            g.fill(x + 9, ry, x + 33, ry + 9, lost ? 0x44FF4D6D : 0x443DF08A);
+            g.fill(x + 9, ry, x + 33, ry + 9, lost ? 0x44F14A7B : 0x4459F58C);
             small(g, f, lost ? "LOST" : "WON", x + (lost ? 14 : 15), ry + 2, col);
             String amt = money2(b.amount());
             String t = ago(b.ts());
-            int tw = (int) (f.width(t) * 0.7f);
+            int tw = (int) (tw(f, t) * 0.7f);
             small(g, f, t, x + w - 9 - tw, ry + 2, MUTED);
-            int ax = x + w - 9 - Math.max(tw, 14) - 6 - f.width(amt);
-            g.text(f, amt, ax, ry, col, false);
-            g.text(f, fit(f, b.name(), ax - (x + 38) - 4), x + 38, ry, WHITE, false);
+            int ax = x + w - 9 - Math.max(tw, 14) - 6 - tw(f, amt);
+            tx(g, f, amt, ax, ry, col, false);
+            tx(g, f, fit(f, b.name(), ax - (x + 38) - 4), x + 38, ry, WHITE, false);
             ry += 16;
         }
     }
@@ -703,8 +757,8 @@ public class BalanceHudClient implements ClientModInitializer {
         int ry = y + 32;
         for (Map.Entry<String, Double> e : rows) {
             String t = signed(e.getValue());
-            g.text(f, fit(f, e.getKey(), w - 24 - f.width(t)), x + 8, ry, WHITE, false);
-            g.text(f, t, x + w - 8 - f.width(t), ry, e.getValue() >= 0 ? GREEN : RED, false);
+            tx(g, f, fit(f, e.getKey(), w - 24 - tw(f, t)), x + 8, ry, WHITE, false);
+            tx(g, f, t, x + w - 8 - tw(f, t), ry, e.getValue() >= 0 ? GREEN : RED, false);
             ry += 14;
         }
     }
@@ -725,22 +779,22 @@ public class BalanceHudClient implements ClientModInitializer {
         if (aucActive) {
             long left = Math.max(0, aucEnd - now);
             String t = String.format("%d:%02d", left / 60000, (left / 1000) % 60);
-            g.text(f, fit(f, aucItem, w - 70), x + 8, ry + 1, WHITE, false);
+            tx(g, f, fit(f, aucItem, w - 70), x + 8, ry + 1, WHITE, false);
             g.pose().pushMatrix();
-            g.pose().translate(x + w - 8 - (int) (f.width(t) * 1.5f), ry - 1);
+            g.pose().translate(x + w - 8 - (int) (tw(f, t) * 1.5f), ry - 1);
             g.pose().scale(1.5f, 1.5f);
-            g.text(f, t, 0, 0, PINK, false);
+            tx(g, f, t, 0, 0, PINK, false);
             g.pose().popMatrix();
             int by = ry + 14;
             g.fill(x + 8, by, x + w - 8, by + 2, 0x28FFFFFF);
             g.fill(x + 8, by, x + 8 + (int) ((w - 16) * (left / (double) aucDur)), by + 2, PINK);
             small(g, f, "TOP BID", x + 8, ry + 20, MUTED);
             if (aucTopName == null) {
-                g.text(f, "No bids yet", x + 8, ry + 29, MUTED, false);
+                tx(g, f, "No bids yet", x + 8, ry + 29, MUTED, false);
             } else {
                 String amt = money2(aucTopAmt);
-                g.text(f, amt, x + w - 8 - f.width(amt), ry + 29, GREEN, false);
-                g.text(f, fit(f, aucTopName, w - 24 - f.width(amt)), x + 8, ry + 29, WHITE, false);
+                tx(g, f, amt, x + w - 8 - tw(f, amt), ry + 29, GREEN, false);
+                tx(g, f, fit(f, aucTopName, w - 24 - tw(f, amt)), x + 8, ry + 29, WHITE, false);
             }
             ry += 46;
         }
@@ -752,11 +806,11 @@ public class BalanceHudClient implements ClientModInitializer {
                 Auc au = AUC_LOG.get(i);
                 boolean sold = au.amount() > 0;
                 String amt = sold ? money2(au.amount()) : "no bids";
-                g.text(f, fit(f, au.item(), w - 24 - f.width(amt)), x + 8, ry, WHITE, false);
-                g.text(f, amt, x + w - 8 - f.width(amt), ry, sold ? GREEN : MUTED, false);
+                tx(g, f, fit(f, au.item(), w - 24 - tw(f, amt)), x + 8, ry, WHITE, false);
+                tx(g, f, amt, x + w - 8 - tw(f, amt), ry, sold ? GREEN : MUTED, false);
                 String t = ago(au.ts());
                 small(g, f, sold ? "won by " + au.winner() : "ended", x + 8, ry + 10, MUTED);
-                small(g, f, t, x + w - 8 - (int) (f.width(t) * 0.7f), ry + 10, MUTED);
+                small(g, f, t, x + w - 8 - (int) (tw(f, t) * 0.7f), ry + 10, MUTED);
                 ry += 20;
             }
         }
@@ -776,14 +830,14 @@ public class BalanceHudClient implements ClientModInitializer {
         int h = 24 + rows.size() * 17 + 2;
         panel(g, x, y, w, h);
         spaced(g, f, "RAKEBACK", x + 8, y + 7, TITLE);
-        small(g, f, RAKE_RULE, x + w - 8 - (int) (f.width(RAKE_RULE) * 0.7f), y + 8, MUTED);
+        small(g, f, RAKE_RULE, x + w - 8 - (int) (tw(f, RAKE_RULE) * 0.7f), y + 8, MUTED);
         int ry = y + 22;
         for (Map.Entry<String, Double> e : rows) {
             double loss = e.getValue();
             boolean owed = loss >= RAKE_TARGET;
             String t = owed ? "owed " + money(loss * RAKE_PCT) : money(loss) + " / " + RAKE_LABEL;
-            g.text(f, fit(f, e.getKey(), w - 24 - f.width(t)), x + 8, ry, WHITE, false);
-            g.text(f, t, x + w - 8 - f.width(t), ry, owed ? GREEN : MUTED, false);
+            tx(g, f, fit(f, e.getKey(), w - 24 - tw(f, t)), x + 8, ry, WHITE, false);
+            tx(g, f, t, x + w - 8 - tw(f, t), ry, owed ? GREEN : MUTED, false);
             int by = ry + 10;
             g.fill(x + 8, by, x + w - 8, by + 2, 0x28FFFFFF);
             int bw = (int) ((w - 16) * Math.min(1.0, loss / RAKE_TARGET));
