@@ -73,6 +73,7 @@ public class BalanceHudClient implements ClientModInitializer {
     };
 
     static final Pattern MONEY = Pattern.compile("\\$[\\s\\u00A0]*([\\d,]+(?:\\.\\d+)?)\\s*([kKmMbBtT])?");
+    static int BAL_W = 0;   // extra width for the balance box (/balwidth)
     static float BAL_SCALE = 1f, PROFIT_SCALE = 1f, RAKE_SCALE = 1f, AUC_SCALE = 1f;   // per-panel size on top of /hudscale
     static float SCALE = 0.65f;   // overall size of all panels (change in game with /hudscale 0.5 ... 1.5)
 
@@ -127,6 +128,7 @@ public class BalanceHudClient implements ClientModInitializer {
         //  /auclog start 60 Item | end | time 90 | clear   /auchud x y
         //  /rake remove Name | clear   (resets only rakeback)
         //  /profit [profit|bets|nets|auto|rake|auction|balance|hide|show|reset|clear]
+        //  /balwidth 60  (make the balance box longer)
         //  /profitscale 0.8  /balscale  /rakescale  /aucscale   (size of one panel)
         //  /hudscale 0.75, /balhud, /profithud, /rakehud   <x> <y> | left|right|up|down [amt] | reset
         //  /nets <name> <amount> | set <name> <amount> | remove <name> | clear
@@ -143,6 +145,7 @@ public class BalanceHudClient implements ClientModInitializer {
                     case "nets" -> edit(NETS, a);
                     case "auclog" -> auctionCmd(a);
                     case "hudscale" -> { if (a.length > 1) SCALE = cl(Float.parseFloat(a[1])); }
+                    case "balwidth" -> { if (a.length > 1) BAL_W = Math.max(0, Math.min(600, Integer.parseInt(a[1]))); }
                     case "balscale" -> { if (a.length > 1) BAL_SCALE = cl(Float.parseFloat(a[1])); }
                     case "profitscale" -> { if (a.length > 1) PROFIT_SCALE = cl(Float.parseFloat(a[1])); }
                     case "rakescale" -> { if (a.length > 1) RAKE_SCALE = cl(Float.parseFloat(a[1])); }
@@ -371,6 +374,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     static void save() {
         StringBuilder sb = new StringBuilder();
+        sb.append("balw,").append(BAL_W).append('\n');
         sb.append("balance,").append(balance).append('\n');
         sb.append("scale,").append(SCALE).append('\n');
         sb.append("scales,").append(BAL_SCALE).append(',').append(PROFIT_SCALE).append(',').append(RAKE_SCALE).append(',').append(AUC_SCALE).append('\n');
@@ -414,6 +418,7 @@ public class BalanceHudClient implements ClientModInitializer {
                             RAKE_SCALE = cl(Float.parseFloat(p[3]));
                             AUC_SCALE = cl(Float.parseFloat(p[4]));
                         }
+                        case "balw" -> BAL_W = Math.max(0, Math.min(600, Integer.parseInt(p[1])));
                         case "balance" -> balance = Double.parseDouble(p[1]);
                         case "scale" -> SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(p[1])));
                         case "net" -> NETS.put(p[1], Double.parseDouble(p[2]));
@@ -578,7 +583,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static void renderBalance(GuiGraphicsExtractor g, Font f) {
         int X = BAL[0], Y = BAL[1];
         String amount = balance < 0 ? "$---" : String.format("$%,d", (long) balance);
-        int w = Math.max(120, (int) (tw(f, amount) * 1.8f) + 22);
+        int w = Math.max(120, (int) (tw(f, amount) * 1.8f) + 22) + BAL_W;
         panel(g, X, Y, w, 48);
         spaced(g, f, NAME.toUpperCase(), X + 10, Y + 7, TITLE);
         g.pose().pushMatrix();
@@ -607,7 +612,7 @@ public class BalanceHudClient implements ClientModInitializer {
             int yy = y + (int) ((max - v) / (max - min) * (h - 1));
             int top = Math.min(yy, yz), bot = Math.max(yy, yz) + 1;
             boolean up = v >= 0;
-            g.fill(x + i, top, x + i + 1, bot, up ? 0x3059F58C : 0x30F14A7B);
+            g.fill(x + i, top, x + i + 1, bot, up ? 0x2259F58C : 0x22F14A7B);
             g.fill(x + i, yy, x + i + 1, yy + 1, up ? GREEN : RED);
             last = yy;
         }
@@ -679,11 +684,11 @@ public class BalanceHudClient implements ClientModInitializer {
         String pill = signed(profit);
         int pw = (int) (tw(f, pill) * 0.7f) + 8;
         int ex2 = cx + cw - 3;
-        g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 2, pc);
+        g.fill(ex2 - 2, lastY - 2, ex2 + 2, lastY + 2, pc);
         int px = ex2 - pw - 6;
         int pyy = Math.max(cy + 1, Math.min(cy + ch - 10, lastY - 4));
         g.fill(px, pyy, px + pw, pyy + 9, pc);
-        small(g, f, pill, px + 4, pyy + 2, profit >= 0 ? 0xFF0E1016 : WHITE);
+        small(g, f, pill, px + 4, pyy + 2, 0xFF0E1016);
 
         // top winners / top losers cards
         List<Map.Entry<String, Double>> ups = new ArrayList<>();
