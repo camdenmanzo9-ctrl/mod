@@ -106,6 +106,8 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     static double balance = -1, start = -1;
+    static double balShown = -1;   // the number drawn on screen: it counts up/down to "balance"
+    static long balTick = 0;
     static boolean awaiting = false;
     static long requestedAt = 0;
 
@@ -527,7 +529,13 @@ public class BalanceHudClient implements ClientModInitializer {
     // ---- balance box ----
     static void renderBalance(GuiGraphicsExtractor g, Font f) {
         int X = BAL[0], Y = BAL[1];
-        String amount = balance < 0 ? "$---" : String.format("$%,d", (long) balance);
+        long nowN = System.nanoTime();
+        double dt = balTick == 0 ? 0 : Math.min(0.1, (nowN - balTick) / 1e9);
+        balTick = nowN;
+        if (balance < 0) balShown = -1;
+        else if (balShown < 0 || Math.abs(balance - balShown) < 1) balShown = balance;
+        else balShown += (balance - balShown) * (1 - Math.exp(-dt * 5));   // rolls to the new number in about half a second
+        String amount = balShown < 0 ? "$---" : String.format("$%,d", Math.round(balShown));
         int w = Math.max(120, (int) (tw(f, amount) * 1.8f) + 22) + BAL_W;
         panel(g, X, Y, w, 48);
         spaced(g, f, NAME.toUpperCase(), X + 10, Y + 7, TITLE);
