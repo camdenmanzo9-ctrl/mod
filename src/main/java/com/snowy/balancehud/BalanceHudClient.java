@@ -174,8 +174,6 @@ public class BalanceHudClient implements ClientModInitializer {
             return false;
         });
 
-        ClientPlayConnectionEvents.JOIN.register((h, sn, c) -> { balance = -1; start = -1; });
-
         // When YOU run /bal (or /balance), read the reply and update the balance box.
         ClientSendMessageEvents.COMMAND.register(cmd -> {
             String c = cmd.trim().toLowerCase();
@@ -197,6 +195,7 @@ public class BalanceHudClient implements ClientModInitializer {
                         balance = v;
                         if (start < 0) start = v;
                         awaiting = false;
+                        save();
                         return;
                     }
                 }
@@ -372,6 +371,7 @@ public class BalanceHudClient implements ClientModInitializer {
 
     static void save() {
         StringBuilder sb = new StringBuilder();
+        sb.append("balance,").append(balance).append('\n');
         sb.append("scale,").append(SCALE).append('\n');
         sb.append("scales,").append(BAL_SCALE).append(',').append(PROFIT_SCALE).append(',').append(RAKE_SCALE).append(',').append(AUC_SCALE).append('\n');
         sb.append("pos,bal,").append(BAL[0]).append(',').append(BAL[1]).append('\n');
@@ -414,6 +414,7 @@ public class BalanceHudClient implements ClientModInitializer {
                             RAKE_SCALE = cl(Float.parseFloat(p[3]));
                             AUC_SCALE = cl(Float.parseFloat(p[4]));
                         }
+                        case "balance" -> balance = Double.parseDouble(p[1]);
                         case "scale" -> SCALE = Math.max(0.4f, Math.min(1.5f, Float.parseFloat(p[1])));
                         case "net" -> NETS.put(p[1], Double.parseDouble(p[2]));
                         case "tot" -> { IN_TOTAL = Double.parseDouble(p[1]); OUT_TOTAL = Double.parseDouble(p[2]); }
