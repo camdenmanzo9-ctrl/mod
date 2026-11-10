@@ -79,8 +79,10 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     static Component fntB(String s) {
-        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_BOLD)) : Component.literal(s);
+        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_BOLD).withBold(true)) : Component.literal(s);
     }
+
+    static int twb(Font f, String s) { return f.width(fntB(s)); }
     static int tw(Font f, String s) { return f.width(fnt(s)); }
     static void tx(GuiGraphicsExtractor g, Font f, String s, int x, int y, int color, boolean shadow) {
         g.text(f, fnt(s), x, y, color, shadow);
@@ -447,13 +449,26 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     // inner box with a thin tinted border (Top Winners / Top Losers)
+    static void rrect(GuiGraphicsExtractor g, int x, int y, int w, int h, int c) {
+        g.fill(x + 2, y, x + w - 2, y + 1, c);
+        g.fill(x + 1, y + 1, x + w - 1, y + 2, c);
+        g.fill(x, y + 2, x + w, y + h - 2, c);
+        g.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, c);
+        g.fill(x + 2, y + h - 1, x + w - 2, y + h, c);
+    }
+
+    // inner box with a thin tinted border and softly rounded corners (Top Winners / Top Losers)
     static void card(GuiGraphicsExtractor g, int x, int y, int w, int h, int tint) {
-        g.fill(x, y, x + w, y + h, 0x30000000);
+        rrect(g, x, y, w, h, 0x30000000);
         int b = 0x44000000 | (tint & 0xFFFFFF);
-        g.fill(x, y, x + w, y + 1, b);
-        g.fill(x, y + h - 1, x + w, y + h, b);
-        g.fill(x, y + 1, x + 1, y + h - 1, b);
-        g.fill(x + w - 1, y + 1, x + w, y + h - 1, b);
+        g.fill(x + 2, y, x + w - 2, y + 1, b);
+        g.fill(x + 2, y + h - 1, x + w - 2, y + h, b);
+        g.fill(x, y + 2, x + 1, y + h - 2, b);
+        g.fill(x + w - 1, y + 2, x + w, y + h - 2, b);
+        g.fill(x + 1, y + 1, x + 2, y + 2, b);
+        g.fill(x + w - 2, y + 1, x + w - 1, y + 2, b);
+        g.fill(x + 1, y + h - 2, x + 2, y + h - 1, b);
+        g.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, b);
     }
 
     static void box(GuiGraphicsExtractor g, int x, int y, int w, int h, int c) {
@@ -495,6 +510,14 @@ public class BalanceHudClient implements ClientModInitializer {
         g.pose().translate(x, y);
         g.pose().scale(0.7f, 0.7f);
         tx(g, f, s, 0, 0, color, false);
+        g.pose().popMatrix();
+    }
+
+    static void smallB(GuiGraphicsExtractor g, Font f, String s, int x, int y, int color) {
+        g.pose().pushMatrix();
+        g.pose().translate(x, y);
+        g.pose().scale(0.7f, 0.7f);
+        txb(g, f, s, 0, 0, color);
         g.pose().popMatrix();
     }
 
@@ -553,7 +576,7 @@ public class BalanceHudClient implements ClientModInitializer {
         double min = 0, max = 0;
         for (double v : HISTORY) { min = Math.min(min, v); max = Math.max(max, v); }
         if (max - min < 1) max = min + 1;
-        int yz = y + (int) (max / (max - min) * (h - 1));
+        int yz = y + (int) (max / (max - min) * (h - 2));
         for (int dx = 0; dx < w; dx += 4) g.fill(x + dx, yz, x + Math.min(w, dx + 2), yz + 1, 0x44FFFFFF);
         if (n < 2) return yz;
         int last = yz;
@@ -562,11 +585,23 @@ public class BalanceHudClient implements ClientModInitializer {
             int i0 = (int) Math.floor(t);
             int i1 = Math.min(n - 1, i0 + 1);
             double v = HISTORY.get(i0) + (HISTORY.get(i1) - HISTORY.get(i0)) * (t - i0);
-            int yy = y + (int) ((max - v) / (max - min) * (h - 1));
-            int top = Math.min(yy, yz), bot = Math.max(yy, yz) + 1;
+            int yy = y + (int) ((max - v) / (max - min) * (h - 2));
             boolean up = v >= 0;
-            g.fill(x + i, top, x + i + 1, bot, up ? 0x2259F58C : 0x22F14A7B);
-            g.fill(x + i, yy, x + i + 1, yy + 1, up ? GREEN : RED);
+            int rgb = (up ? GREEN : RED) & 0xFFFFFF;
+            // fill between the line and the zero line, strongest at the line and fading away from it
+            int from = up ? yy + 2 : yz + 1;
+            int to = up ? yz : yy;
+            int span = to - from;
+            if (span > 0) {
+                int bands = Math.min(6, span);
+                for (int b = 0; b < bands; b++) {
+                    double k = up ? (double) b / bands : (double) (bands - 1 - b) / bands;
+                    int a = (int) (0x58 * (1.0 - k));
+                    int y0 = from + b * span / bands, y1 = from + (b + 1) * span / bands;
+                    if (y1 > y0) g.fill(x + i, y0, x + i + 1, y1, (a << 24) | rgb);
+                }
+            }
+            g.fill(x + i, yy, x + i + 1, yy + 2, up ? GREEN : RED);
             last = yy;
         }
         return last;
@@ -577,7 +612,6 @@ public class BalanceHudClient implements ClientModInitializer {
     static final long PAGE_MS = 8000;
 
     static void renderProfit(GuiGraphicsExtractor g, Font f) {
-        if (HISTORY.isEmpty() && NETS.isEmpty()) return;
         int w = 220, h = 262;
         int x = PROFIT_POS[0] < 0 ? sw() - 8 - (int) (w * PROFIT_SCALE) : PROFIT_POS[0];
         int y = PROFIT_POS[1];
@@ -611,37 +645,38 @@ public class BalanceHudClient implements ClientModInitializer {
         spaced(g, f, "PROFIT", x + 8, y + 7, TITLE);
 
         g.pose().pushMatrix();
-        g.pose().translate(x + 8, y + 19);
-        g.pose().scale(2f, 2f);
+        g.pose().translate(x + 8, y + 18);
+        g.pose().scale(2.3f, 2.3f);
         txb(g, f, signed(profit), 0, 0, pc);
         g.pose().popMatrix();
 
-        int ry = y + 42;
+        int ry = y + 46;
         tx(g, f, "In", x + 8, ry, MUTED, false);
-        tx(g, f, money2(IN_TOTAL), x + 8 + tw(f, "In "), ry, WHITE, false);
-        int ox = x + 100;
+        txb(g, f, money2(IN_TOTAL), x + 8 + tw(f, "In "), ry, WHITE);
+        int ox = x + 104;
         tx(g, f, "Out", ox, ry, MUTED, false);
-        tx(g, f, money2(OUT_TOTAL), ox + tw(f, "Out "), ry, WHITE, false);
+        txb(g, f, money2(OUT_TOTAL), ox + tw(f, "Out "), ry, WHITE);
 
-        // chart box with high / low labels, solid end tag and LIVE
-        int cx = x + 8, cy = y + 57, cw = w - 16, ch = 50;
-        g.fill(cx, cy, cx + cw, cy + ch, 0x30000000);
-        int lastY = drawChart(g, cx + 1, cy + 1, cw - 2, ch - 2);
+        // chart box with high / low labels, end tag and LIVE
+        int cx = x + 8, cy = y + 61, cw = w - 16, ch = 50;
+        rrect(g, cx, cy, cw, ch, 0x30000000);
+        int lastY = drawChart(g, cx + 3, cy + 4, cw - 6, ch - 8);
         double mn = 0, mx = 0;
         for (double v : HISTORY) { mn = Math.min(mn, v); mx = Math.max(mx, v); }
-        small(g, f, mx > 0 ? signed(mx) : "$0", cx + 3, cy + 2, MUTED);
-        small(g, f, mn < 0 ? signed(mn) : "$0", cx + 1, cy + ch + 3, MUTED);
+        small(g, f, mx > 0 ? signed(mx) : "+$0", cx + 5, cy + 3, MUTED);
+        small(g, f, mn < 0 ? signed(mn) : "+$0", cx + 1, cy + ch + 3, MUTED);
         g.fill(x + w - 38, cy + ch + 5, x + w - 35, cy + ch + 8, PINK);
-        small(g, f, "LIVE", x + w - 33, cy + ch + 3, PINK);
+        small(g, f, "LIVE", x + w - 33, cy + ch + 3, MUTED);
 
         String pill = signed(profit);
-        int pw = (int) (tw(f, pill) * 0.7f) + 8;
-        int ex2 = cx + cw - 3;
-        g.fill(ex2 - 2, lastY - 2, ex2 + 2, lastY + 2, pc);
-        int px = ex2 - pw - 6;
-        int pyy = Math.max(cy + 1, Math.min(cy + ch - 10, lastY - 4));
-        g.fill(px, pyy, px + pw, pyy + 9, pc);
-        small(g, f, pill, px + 4, pyy + 2, 0xFF0E1016);
+        int pw = (int) (twb(f, pill) * 0.7f) + 10;
+        int ex2 = cx + cw - 5;
+        g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 3, pc);
+        g.fill(ex2 - 2, lastY, ex2 + 3, lastY + 2, pc);
+        int px = ex2 - pw - 4;
+        int pyy = Math.max(cy + 2, Math.min(cy + ch - 12, lastY - 13));
+        rrect(g, px, pyy, pw, 10, pc);
+        smallB(g, f, pill, px + 5, pyy + 2, 0xFF0E1016);
 
         // top winners / top losers cards
         List<Map.Entry<String, Double>> ups = new ArrayList<>();
@@ -654,41 +689,45 @@ public class BalanceHudClient implements ClientModInitializer {
         downs.sort(Map.Entry.<String, Double>comparingByValue());
 
         int gap = 6, colW = (w - 16 - gap) / 2;
-        int ty = y + 122, th = 76;
+        int ty = y + 126, th = 76;
         int lx = x + 8, rx = x + 8 + colW + gap;
         card(g, lx, ty, colW, th, GREEN);
         card(g, rx, ty, colW, th, RED);
-        txb(g, f, "TOP WINNERS", lx + 5, ty + 5, GREEN);
-        txb(g, f, "TOP LOSERS", rx + 5, ty + 5, RED);
+        spaced(g, f, "TOP WINNERS", lx + 5, ty + 5, GREEN);
+        spaced(g, f, "TOP LOSERS", rx + 5, ty + 5, RED);
+        if (ups.isEmpty()) tx(g, f, "None yet", lx + 5, ty + 19, MUTED, false);
+        if (downs.isEmpty()) tx(g, f, "None yet", rx + 5, ty + 19, MUTED, false);
         for (int i = 0; i < 5; i++) {
             int r = ty + 19 + i * 11;
             if (i < ups.size()) {
                 String amt = money2(ups.get(i).getValue());
-                tx(g, f, fit(f, ups.get(i).getKey(), colW - 14 - tw(f, amt)), lx + 5, r, WHITE, false);
-                tx(g, f, amt, lx + colW - 5 - tw(f, amt), r, GREEN, false);
+                tx(g, f, fit(f, ups.get(i).getKey(), colW - 14 - twb(f, amt)), lx + 5, r, WHITE, false);
+                txb(g, f, amt, lx + colW - 5 - twb(f, amt), r, GREEN);
             }
             if (i < downs.size()) {
                 String amt = money2(downs.get(i).getValue());
-                tx(g, f, fit(f, downs.get(i).getKey(), colW - 14 - tw(f, amt)), rx + 5, r, WHITE, false);
-                tx(g, f, amt, rx + colW - 5 - tw(f, amt), r, RED, false);
+                tx(g, f, fit(f, downs.get(i).getKey(), colW - 14 - twb(f, amt)), rx + 5, r, WHITE, false);
+                txb(g, f, amt, rx + colW - 5 - twb(f, amt), r, RED);
             }
         }
 
         // last 3 payments
+        if (RECENT.isEmpty()) tx(g, f, "No payments yet", x + 9, y + 209, MUTED, false);
         for (int i = 0; i < 3 && i < RECENT.size(); i++) {
             Bet b = RECENT.get(i);
             boolean got = b.amount() >= 0;
-            int r = y + 207 + i * 14;
+            int r = y + 209 + i * 14;
             String amt = signed(b.amount());
-            arrow(g, x + 9, r + 1, got, 0xFFBFC4D0);
-            tx(g, f, fit(f, b.name(), w - 62 - tw(f, amt)), x + 22, r, WHITE, false);
-            tx(g, f, amt, x + w - 8 - tw(f, amt), r, got ? GREEN : RED, false);
+            arrow(g, x + 9, r + 1, got, 0xFFB4B8C8);
+            txb(g, f, fit(f, b.name(), w - 62 - twb(f, amt)), x + 22, r, WHITE);
+            txb(g, f, amt, x + w - 8 - twb(f, amt), r, got ? GREEN : RED);
         }
     }
 
     static void betsPage(GuiGraphicsExtractor g, Font f, int x, int y, int w) {
         spaced(g, f, "RECENT BETS", x + 8, y + 7, TITLE);
         int ry = y + 24;
+        if (RECENT.isEmpty()) tx(g, f, "No payments yet", x + 8, ry, MUTED, false);
         for (int i = 0; i < RECENT.size() && i < 12; i++) {
             Bet b = RECENT.get(i);
             boolean lost = b.amount() >= 0;      // they paid you = they lost
@@ -714,6 +753,7 @@ public class BalanceHudClient implements ClientModInitializer {
         rows.sort(Map.Entry.<String, Double>comparingByValue().reversed());
         if (rows.size() > 13) rows = rows.subList(0, 13);
         int ry = y + 32;
+        if (rows.isEmpty()) tx(g, f, "No players yet", x + 8, ry, MUTED, false);
         for (Map.Entry<String, Double> e : rows) {
             String t = signed(e.getValue());
             tx(g, f, fit(f, e.getKey(), w - 24 - tw(f, t)), x + 8, ry, WHITE, false);
@@ -728,16 +768,16 @@ public class BalanceHudClient implements ClientModInitializer {
         for (Map.Entry<String, Double> e : NETS.entrySet())
             if (e.getValue() < 0 && -e.getValue() - RAKE_BASE.getOrDefault(e.getKey(), 0.0) > 0)
                 rows.add(Map.entry(e.getKey(), -e.getValue() - RAKE_BASE.getOrDefault(e.getKey(), 0.0)));
-        if (rows.isEmpty()) return;
         rows.sort(Map.Entry.<String, Double>comparingByValue().reversed());
         if (rows.size() > 7) rows = rows.subList(0, 7);
         int x = RAKE_POS[0], y = RAKE_POS[1];
         int w = 180;
-        int h = 24 + rows.size() * 17 + 2;
+        int h = 24 + Math.max(1, rows.size()) * 17 + 2;
         panel(g, x, y, w, h);
         spaced(g, f, "RAKEBACK", x + 8, y + 7, TITLE);
         small(g, f, RAKE_RULE, x + w - 8 - (int) (tw(f, RAKE_RULE) * 0.7f), y + 8, MUTED);
         int ry = y + 22;
+        if (rows.isEmpty()) tx(g, f, "No rakeback yet", x + 8, y + 26, MUTED, false);
         for (Map.Entry<String, Double> e : rows) {
             double loss = e.getValue();
             boolean owed = loss >= RAKE_TARGET;
