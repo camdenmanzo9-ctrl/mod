@@ -107,6 +107,8 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     static double balance = -1, start = -1;
+    static int pinned = -1;   // -1 = pages rotate by themselves
+    static boolean balHidden = false, profitHidden = false, rakeHidden = false;
     static double balShown = -1;   // the number drawn on screen: it counts up/down to "balance"
     static long balTick = 0;
     static boolean awaiting = false;
