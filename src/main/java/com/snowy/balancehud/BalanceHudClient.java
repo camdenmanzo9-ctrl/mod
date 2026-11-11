@@ -4,7 +4,6 @@ import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.loader.api.FabricLoader;
 import net.fabricmc.fabric.api.client.message.v1.ClientReceiveMessageEvents;
 import net.fabricmc.fabric.api.client.message.v1.ClientSendMessageEvents;
-import net.fabricmc.fabric.api.client.networking.v1.ClientPlayConnectionEvents;
 import net.fabricmc.fabric.api.client.rendering.v1.hud.HudElementRegistry;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -177,9 +176,10 @@ public class BalanceHudClient implements ClientModInitializer {
         });
 
         ClientReceiveMessageEvents.GAME.register((msg, overlay) -> {
+            if (overlay) return;   // ignore the action bar: only normal chat lines are read
             String text = msg.getString();
-            if (!overlay && trackPay(text)) return;
-            if (!overlay && awaiting) {
+            if (trackPay(text)) return;
+            if (awaiting) {
                 if (System.currentTimeMillis() - requestedAt > 5000) {
                     awaiting = false;
                 } else {
@@ -193,7 +193,6 @@ public class BalanceHudClient implements ClientModInitializer {
                     }
                 }
             }
-            if (text.contains("$")) logLine((overlay ? "[bar] " : "[chat] ") + text);
         });
 
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("balancehud", "hud"), (g, dt) -> render(g));
@@ -232,22 +231,6 @@ public class BalanceHudClient implements ClientModInitializer {
         while (RECENT.size() > 12) RECENT.remove(RECENT.size() - 1);
         save();
         return true;
-    }
-
-    // Lines with a $ that we did NOT recognise are saved here, so the wording can be checked.
-    static int pinned = -1;   // -1 = pages rotate by themselves
-    static boolean balHidden = false, profitHidden = false, rakeHidden = false;
-
-    static String lastLogged = "";
-
-    static void logLine(String text) {
-        if (text.equals(lastLogged)) return;
-        lastLogged = text;
-        try {
-            if (Files.exists(LOG) && Files.size(LOG) > 100_000) return;
-            Files.writeString(LOG, text + "\n", java.nio.file.StandardOpenOption.CREATE,
-                    java.nio.file.StandardOpenOption.APPEND);
-        } catch (Exception ignored) { }
     }
 
     // ---------- rakeback reset ----------
@@ -325,7 +308,6 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // ---------- saving ----------
     static final Path CFG = FabricLoader.getInstance().getConfigDir().resolve("balancehud.txt");
-    static final Path LOG = FabricLoader.getInstance().getConfigDir().resolve("balancehud-log.txt");
 
     static void save() {
         StringBuilder sb = new StringBuilder();
