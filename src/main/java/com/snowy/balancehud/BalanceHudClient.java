@@ -164,6 +164,7 @@ public class BalanceHudClient implements ClientModInitializer {
                     default -> { return true; }
                 }
                 save();
+                writeShared();   // keep the dashboard's Profit Panel switches in step
             } catch (Exception ignored) { }
             return false;
         });
@@ -368,6 +369,43 @@ public class BalanceHudClient implements ClientModInitializer {
         } catch (Exception ignored) { }
     }
 
+    // ---------- on/off switches shared with Snowy's Dashboard (PROFIT PANEL tab) ----------
+    // config/snowy-panels.txt holds lines like "balance=on", "profit=off", "rakeback=on".
+    static final Path SHARED = FabricLoader.getInstance().getConfigDir().resolve("snowy-panels.txt");
+    static long sharedChecked = 0, sharedMtime = -1;
+
+    static void readShared() {
+        long now = System.currentTimeMillis();
+        if (now - sharedChecked < 500) return;   // look at the file twice a second at most
+        sharedChecked = now;
+        try {
+            if (!Files.exists(SHARED)) return;
+            long mt = Files.getLastModifiedTime(SHARED).toMillis();
+            if (mt == sharedMtime) return;
+            sharedMtime = mt;
+            for (String line : Files.readAllLines(SHARED)) {
+                String[] p = line.split("=");
+                if (p.length < 2) continue;
+                boolean on = p[1].trim().equalsIgnoreCase("on");
+                switch (p[0].trim().toLowerCase()) {
+                    case "balance" -> balHidden = !on;
+                    case "profit" -> profitHidden = !on;
+                    case "rakeback" -> rakeHidden = !on;
+                    default -> { }
+                }
+            }
+        } catch (Exception ignored) { }
+    }
+
+    static void writeShared() {
+        try {
+            Files.writeString(SHARED, "balance=" + (balHidden ? "off" : "on") + "\n"
+                    + "profit=" + (profitHidden ? "off" : "on") + "\n"
+                    + "rakeback=" + (rakeHidden ? "off" : "on") + "\n");
+            sharedMtime = Files.getLastModifiedTime(SHARED).toMillis();
+        } catch (Exception ignored) { }
+    }
+
     // ---------- formatting ----------
     static Double parse(String s) {
         Matcher m = MONEY.matcher(s);
@@ -522,6 +560,7 @@ public class BalanceHudClient implements ClientModInitializer {
     }
 
     static void render(GuiGraphicsExtractor g) {
+        readShared();   // pick up on/off changes from the dashboard's PROFIT PANEL tab
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.options.hideGui) return;
         Font f = mc.font;
