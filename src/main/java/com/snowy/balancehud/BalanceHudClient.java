@@ -228,7 +228,7 @@ public class BalanceHudClient implements ClientModInitializer {
         if (in) IN_TOTAL += v; else OUT_TOTAL += v;
         if (balance >= 0) balance += in ? v : -v;   // keep the balance box in step with every payment
         HISTORY.add(IN_TOTAL - OUT_TOTAL - PROFIT_BASE);
-        while (HISTORY.size() > 150) HISTORY.remove(0);
+        while (HISTORY.size() > 300) HISTORY.remove(0);
         RECENT.add(0, new Bet(name, in ? v : -v, System.currentTimeMillis()));
         while (RECENT.size() > 12) RECENT.remove(RECENT.size() - 1);
         save();
@@ -561,9 +561,9 @@ public class BalanceHudClient implements ClientModInitializer {
         for (double v : HISTORY) { min = Math.min(min, v); max = Math.max(max, v); }
         if (max - min < 1) max = min + 1;
         int yz = y + (int) (max / (max - min) * (h - 2));
-        for (int dx = 0; dx < w; dx += 4) g.fill(x + dx, yz, x + Math.min(w, dx + 2), yz + 1, 0x44FFFFFF);
+        for (int dx = 0; dx < w; dx += 4) g.fill(x + dx, yz, x + Math.min(w, dx + 2), yz + 1, 0x33FFFFFF);
         if (n < 2) return yz;
-        int last = yz;
+        int last = yz, prev = -1;
         for (int i = 0; i < w; i++) {
             double t = (double) i * (n - 1) / (w - 1);
             int i0 = (int) Math.floor(t);
@@ -572,20 +572,23 @@ public class BalanceHudClient implements ClientModInitializer {
             int yy = y + (int) ((max - v) / (max - min) * (h - 2));
             boolean up = v >= 0;
             int rgb = (up ? GREEN : RED) & 0xFFFFFF;
-            // fill between the line and the zero line, strongest at the line and fading away from it
-            int from = up ? yy + 2 : yz + 1;
+            // very faint fill between the line and the zero line
+            int from = up ? yy + 1 : yz + 1;
             int to = up ? yz : yy;
             int span = to - from;
             if (span > 0) {
-                int bands = Math.min(6, span);
+                int bands = Math.min(5, span);
                 for (int b = 0; b < bands; b++) {
                     double k = up ? (double) b / bands : (double) (bands - 1 - b) / bands;
-                    int a = (int) (0x58 * (1.0 - k));
+                    int a = (int) (0x1E * (1.0 - k));
                     int y0 = from + b * span / bands, y1 = from + (b + 1) * span / bands;
                     if (y1 > y0) g.fill(x + i, y0, x + i + 1, y1, (a << 24) | rgb);
                 }
             }
-            g.fill(x + i, yy, x + i + 1, yy + 2, up ? GREEN : RED);
+            // thin line, joined to the previous column so steep parts stay connected
+            int lo = prev < 0 ? yy : Math.min(prev, yy), hi = prev < 0 ? yy : Math.max(prev, yy);
+            g.fill(x + i, lo, x + i + 1, hi + 1, 0xA0000000 | rgb);
+            prev = yy;
             last = yy;
         }
         return last;
@@ -655,12 +658,13 @@ public class BalanceHudClient implements ClientModInitializer {
         String pill = signed(profit);
         int pw = (int) (twb(f, pill) * 0.7f) + 10;
         int ex2 = cx + cw - 5;
-        g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 3, pc);
-        g.fill(ex2 - 2, lastY, ex2 + 3, lastY + 2, pc);
+        int lineC = 0xA0000000 | (pc & 0xFFFFFF);
+        g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 2, lineC);
+        g.fill(ex2 - 2, lastY, ex2 + 3, lastY + 1, lineC);
         int px = ex2 - pw - 4;
         int pyy = Math.max(cy + 2, Math.min(cy + ch - 12, lastY - 13));
-        rrect(g, px, pyy, pw, 10, pc);
-        smallB(g, f, pill, px + 5, pyy + 2, 0xFF0E1016);
+        rrect(g, px, pyy, pw, 10, 0x40000000 | (pc & 0xFFFFFF));
+        smallB(g, f, pill, px + 5, pyy + 2, pc);
 
         // top winners / top losers cards
         List<Map.Entry<String, Double>> ups = new ArrayList<>();
