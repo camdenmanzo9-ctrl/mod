@@ -657,8 +657,12 @@ public class BalanceHudClient implements ClientModInitializer {
         else netsPage(g, f, x, y, w);
 
         int py = y + h - 11;
-        for (int i = 0; i < PAGES; i++)
-            g.fill(x + 8 + i * 8, py, x + 12 + i * 8, py + 4, i == page ? PINK : 0x55FFFFFF);
+        for (int i = 0; i < PAGES; i++) {   // round page dots
+            int dx = x + 8 + i * 8, c = i == page ? PINK : 0x55FFFFFF;
+            g.fill(dx + 1, py, dx + 3, py + 1, c);       // top
+            g.fill(dx, py + 1, dx + 4, py + 3, c);       // middle
+            g.fill(dx + 1, py + 3, dx + 3, py + 4, c);   // bottom (no overlap, so faint dots stay even)
+        }
         int bx = x + 8 + PAGES * 8 + 6, ex = x + w - 8;
         g.fill(bx, py + 1, ex, py + 3, 0x18FFFFFF);
         g.fill(bx, py + 1, bx + (int) ((ex - bx) * prog), py + 3, PINK);
