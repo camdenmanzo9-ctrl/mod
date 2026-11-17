@@ -26,10 +26,10 @@ import java.util.regex.Pattern;
 public class BalanceHudClient implements ClientModInitializer {
     // ===== EDIT THESE =====
     static final String NAME = "2amsnowy";
-    static final double RAKE_TARGET = 1e9;
-    static final String RAKE_LABEL = "$1B";
-    static final double RAKE_PCT = 0.10;          // rakeback = 10% of what they lost...
-    static final String RAKE_RULE = "10% over $1B lost";   // rakeback = RAKE_PCT of losses once they've lost at least RAKE_TARGET
+    static double RAKE_TARGET = 1e9;
+    static String RAKE_LABEL = "$1B";
+    static double RAKE_PCT = 0.10;          // rakeback = 10% of what they lost...
+    static String RAKE_RULE = "10% over $1B lost";   // rakeback = RAKE_PCT of losses once they've lost at least RAKE_TARGET
     // ======================
 
     static final int[] BAL = {8, 8}, BAL_D = {8, 8};
@@ -114,7 +114,7 @@ public class BalanceHudClient implements ClientModInitializer {
     static boolean awaiting = false;
     static long requestedAt = 0;
 
-    static final int TITLE = 0xFFD88A9E, WHITE = 0xFFFFFFFF, MUTED = 0xFF9EA0B4, GREEN = 0xFF55E875, RED = 0xFFF14A7B, PINK = 0xFFD88A9E;
+    static final int TITLE = 0xFFD07DAA, WHITE = 0xFFFBFEFF, MUTED = 0xFF9EA0B4, GREEN = 0xFF59F58C, RED = 0xFFF14A7B, PINK = 0xFFF14A7B;
 
     @Override
     public void onInitializeClient() {
@@ -164,7 +164,6 @@ public class BalanceHudClient implements ClientModInitializer {
                     default -> { return true; }
                 }
                 save();
-                writeShared();   // keep the dashboard's Profit Panel switches in step
             } catch (Exception ignored) { }
             return false;
         });
@@ -199,6 +198,12 @@ public class BalanceHudClient implements ClientModInitializer {
         });
 
         HudElementRegistry.addLast(Identifier.fromNamespaceAndPath("balancehud", "hud"), (g, dt) -> render(g));
+
+        // Payments that Snowy's Client hides from chat are still counted here
+        ClientReceiveMessageEvents.GAME_CANCELED.register((msg, overlay) -> {
+            if (overlay) return;
+            trackPay(msg.getString());
+        });
     }
 
     // Player pays you = they bet (their net goes down). You pay them = they win (their net goes up).
@@ -220,6 +225,7 @@ public class BalanceHudClient implements ClientModInitializer {
         if (m == null) return false;
         Double v = amount(m.group("num") + (m.group("suf") == null ? "" : m.group("suf")));
         if (v == null) return false;
+        if (auctionOn && in) return true;   // an auction is running: money paid to you is a bid, not a bet
         String name = m.group("name");
         String key = name;
         for (String n : NETS.keySet()) if (n.equalsIgnoreCase(name)) { key = n; break; }
@@ -369,43 +375,6 @@ public class BalanceHudClient implements ClientModInitializer {
         } catch (Exception ignored) { }
     }
 
-    // ---------- on/off switches shared with Snowy's Dashboard (PROFIT PANEL tab) ----------
-    // config/snowy-panels.txt holds lines like "balance=on", "profit=off", "rakeback=on".
-    static final Path SHARED = FabricLoader.getInstance().getConfigDir().resolve("snowy-panels.txt");
-    static long sharedChecked = 0, sharedMtime = -1;
-
-    static void readShared() {
-        long now = System.currentTimeMillis();
-        if (now - sharedChecked < 500) return;   // look at the file twice a second at most
-        sharedChecked = now;
-        try {
-            if (!Files.exists(SHARED)) return;
-            long mt = Files.getLastModifiedTime(SHARED).toMillis();
-            if (mt == sharedMtime) return;
-            sharedMtime = mt;
-            for (String line : Files.readAllLines(SHARED)) {
-                String[] p = line.split("=");
-                if (p.length < 2) continue;
-                boolean on = p[1].trim().equalsIgnoreCase("on");
-                switch (p[0].trim().toLowerCase()) {
-                    case "balance" -> balHidden = !on;
-                    case "profit" -> profitHidden = !on;
-                    case "rakeback" -> rakeHidden = !on;
-                    default -> { }
-                }
-            }
-        } catch (Exception ignored) { }
-    }
-
-    static void writeShared() {
-        try {
-            Files.writeString(SHARED, "balance=" + (balHidden ? "off" : "on") + "\n"
-                    + "profit=" + (profitHidden ? "off" : "on") + "\n"
-                    + "rakeback=" + (rakeHidden ? "off" : "on") + "\n");
-            sharedMtime = Files.getLastModifiedTime(SHARED).toMillis();
-        } catch (Exception ignored) { }
-    }
-
     // ---------- formatting ----------
     static Double parse(String s) {
         Matcher m = MONEY.matcher(s);
@@ -454,20 +423,16 @@ public class BalanceHudClient implements ClientModInitializer {
 
     // ---------- drawing ----------
     static void panel(GuiGraphicsExtractor g, int x, int y, int w, int h) {
-        int bg = 0xEB11161F, bd = 0xFF1F2735;
+        panel(g, x, y, w, h, 0xE5111720);
+    }
+
+    // no border, just the rounded background
+    static void panel(GuiGraphicsExtractor g, int x, int y, int w, int h, int bg) {
         g.fill(x + 2, y, x + w - 2, y + 1, bg);
         g.fill(x + 1, y + 1, x + w - 1, y + 2, bg);
         g.fill(x, y + 2, x + w, y + h - 2, bg);
         g.fill(x + 1, y + h - 2, x + w - 1, y + h - 1, bg);
         g.fill(x + 2, y + h - 1, x + w - 2, y + h, bg);
-        g.fill(x + 2, y, x + w - 2, y + 1, bd);
-        g.fill(x + 2, y + h - 1, x + w - 2, y + h, bd);
-        g.fill(x, y + 2, x + 1, y + h - 2, bd);
-        g.fill(x + w - 1, y + 2, x + w, y + h - 2, bd);
-        g.fill(x + 1, y + 1, x + 2, y + 2, bd);
-        g.fill(x + w - 2, y + 1, x + w - 1, y + 2, bd);
-        g.fill(x + 1, y + h - 2, x + 2, y + h - 1, bd);
-        g.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, bd);
     }
 
     // inner box with a thin tinted border (Top Winners / Top Losers)
@@ -482,15 +447,6 @@ public class BalanceHudClient implements ClientModInitializer {
     // inner box with a thin tinted border and softly rounded corners (Top Winners / Top Losers)
     static void card(GuiGraphicsExtractor g, int x, int y, int w, int h, int tint) {
         rrect(g, x, y, w, h, 0x30000000);
-        int b = 0x44000000 | (tint & 0xFFFFFF);
-        g.fill(x + 2, y, x + w - 2, y + 1, b);
-        g.fill(x + 2, y + h - 1, x + w - 2, y + h, b);
-        g.fill(x, y + 2, x + 1, y + h - 2, b);
-        g.fill(x + w - 1, y + 2, x + w, y + h - 2, b);
-        g.fill(x + 1, y + 1, x + 2, y + 2, b);
-        g.fill(x + w - 2, y + 1, x + w - 1, y + 2, b);
-        g.fill(x + 1, y + h - 2, x + 2, y + h - 1, b);
-        g.fill(x + w - 2, y + h - 2, x + w - 1, y + h - 1, b);
     }
 
     static void box(GuiGraphicsExtractor g, int x, int y, int w, int h, int c) {
@@ -559,8 +515,61 @@ public class BalanceHudClient implements ClientModInitializer {
         return (h / 24) + "d";
     }
 
+    // Settings written by Snowy's Client (a plain text file in the config folder). Read-only here.
+    static final Path CTL = FabricLoader.getInstance().getConfigDir().resolve("snowys-hud.txt");
+    static long ctlStamp = 0, ctlCheck = 0;
+    static boolean auctionOn = false;   // set by Snowy's Client while an auction runs
+
+    static void syncControl() {
+        long now = System.currentTimeMillis();
+        if (now - ctlCheck < 500) return;
+        ctlCheck = now;
+        try {
+            long m = Files.getLastModifiedTime(CTL).toMillis();
+            if (m == ctlStamp) return;
+            ctlStamp = m;
+            for (String line : Files.readAllLines(CTL)) {
+                try {
+                    String[] kv = line.split("=", 2);
+                    if (kv.length < 2) continue;
+                    String k = kv[0].trim(), v = kv[1].trim();
+                    switch (k) {
+                        case "balance" -> balHidden = !v.equals("1");
+                        case "profit" -> profitHidden = !v.equals("1");
+                        case "rake" -> rakeHidden = !v.equals("1");
+                        case "auction" -> auctionOn = v.equals("1");
+                        case "rake_rate" -> RAKE_PCT = Double.parseDouble(v) / 100.0;
+                        case "rake_min" -> RAKE_TARGET = Double.parseDouble(v);
+                        default -> { }
+                    }
+                } catch (Exception ignored) { }
+            }
+            RAKE_LABEL = money(RAKE_TARGET);
+            RAKE_RULE = trim(RAKE_PCT * 100) + "% over " + RAKE_LABEL + " lost";
+        } catch (Exception ignored) { }
+    }
+
+    // Rakeback numbers for Snowy's Client (a plain text file in the config folder, written about once a second).
+    static final Path RAKE_OUT = FabricLoader.getInstance().getConfigDir().resolve("snowys-rake.txt");
+    static long rakeOutAt = 0;
+
+    static void exportRake() {
+        long now = System.currentTimeMillis();
+        if (now - rakeOutAt < 1000) return;
+        rakeOutAt = now;
+        StringBuilder sb = new StringBuilder();
+        sb.append("rate=").append(trim(RAKE_PCT * 100)).append('\n');
+        sb.append("min=").append((long) RAKE_TARGET).append('\n');
+        for (Map.Entry<String, Double> e : NETS.entrySet()) {
+            double loss = -e.getValue() - RAKE_BASE.getOrDefault(e.getKey(), 0.0);
+            if (e.getValue() < 0 && loss > 0) sb.append("p,").append(e.getKey()).append(',').append(loss).append('\n');
+        }
+        try { Files.writeString(RAKE_OUT, sb.toString()); } catch (Exception ignored) { }
+    }
+
     static void render(GuiGraphicsExtractor g) {
-        readShared();   // pick up on/off changes from the dashboard's PROFIT PANEL tab
+        syncControl();
+        exportRake();
         Minecraft mc = Minecraft.getInstance();
         if (mc.player == null || mc.options.hideGui) return;
         Font f = mc.font;
@@ -600,7 +609,6 @@ public class BalanceHudClient implements ClientModInitializer {
         for (double v : HISTORY) { min = Math.min(min, v); max = Math.max(max, v); }
         if (max - min < 1) max = min + 1;
         int yz = y + (int) (max / (max - min) * (h - 2));
-        for (int dx = 0; dx < w; dx += 4) g.fill(x + dx, yz, x + Math.min(w, dx + 2), yz + 1, 0x33FFFFFF);
         if (n < 2) return yz;
         int last = yz, prev = -1;
         for (int i = 0; i < w; i++) {
@@ -642,7 +650,7 @@ public class BalanceHudClient implements ClientModInitializer {
         int x = PROFIT_POS[0] < 0 ? sw() - 8 - (int) (w * PROFIT_SCALE) : PROFIT_POS[0];
         int y = PROFIT_POS[1];
         begin(g, x, y, PROFIT_SCALE);
-        panel(g, x, y, w, h);
+        panel(g, x, y, w, h, 0xE513234A);   // navy
 
         if (balance >= 0) {
             String bt = "Bal " + money2(balance);
@@ -651,21 +659,13 @@ public class BalanceHudClient implements ClientModInitializer {
 
         long now = System.currentTimeMillis();
         int page = pinned >= 0 ? pinned : (int) ((now / PAGE_MS) % PAGES);
-        double prog = pinned >= 0 ? 1.0 : (now % PAGE_MS) / (double) PAGE_MS;
         if (page == 0) profitPage(g, f, x, y, w);
         else if (page == 1) betsPage(g, f, x, y, w);
         else netsPage(g, f, x, y, w);
 
         int py = y + h - 11;
-        for (int i = 0; i < PAGES; i++) {   // round page dots
-            int dx = x + 8 + i * 8, c = i == page ? PINK : 0x55FFFFFF;
-            g.fill(dx + 1, py, dx + 3, py + 1, c);       // top
-            g.fill(dx, py + 1, dx + 4, py + 3, c);       // middle
-            g.fill(dx + 1, py + 3, dx + 3, py + 4, c);   // bottom (no overlap, so faint dots stay even)
-        }
-        int bx = x + 8 + PAGES * 8 + 6, ex = x + w - 8;
-        g.fill(bx, py + 1, ex, py + 3, 0x18FFFFFF);
-        g.fill(bx, py + 1, bx + (int) ((ex - bx) * prog), py + 3, PINK);
+        for (int i = 0; i < PAGES; i++)
+            g.fill(x + 8 + i * 8, py, x + 12 + i * 8, py + 4, i == page ? PINK : 0x55FFFFFF);
         end(g);
     }
 
@@ -695,14 +695,13 @@ public class BalanceHudClient implements ClientModInitializer {
         for (double v : HISTORY) { mn = Math.min(mn, v); mx = Math.max(mx, v); }
         small(g, f, mx > 0 ? signed(mx) : "+$0", cx + 5, cy + 3, MUTED);
         small(g, f, mn < 0 ? signed(mn) : "+$0", cx + 1, cy + ch + 3, MUTED);
-        g.fill(x + w - 38, cy + ch + 5, x + w - 35, cy + ch + 8, RED);
+        g.fill(x + w - 38, cy + ch + 5, x + w - 35, cy + ch + 8, PINK);
         small(g, f, "LIVE", x + w - 33, cy + ch + 3, MUTED);
 
         String pill = signed(profit);
         int pw = (int) (twb(f, pill) * 0.7f) + 10;
         int ex2 = cx + cw - 5;
         int lineC = 0xA0000000 | (pc & 0xFFFFFF);
-        g.fill(ex2 - 2, lastY - 2, ex2 + 3, lastY + 3, 0x40000000 | (pc & 0xFFFFFF));   // soft glow
         g.fill(ex2 - 1, lastY - 1, ex2 + 2, lastY + 2, lineC);
         g.fill(ex2 - 2, lastY, ex2 + 3, lastY + 1, lineC);
         int px = ex2 - pw - 4;
@@ -804,7 +803,7 @@ public class BalanceHudClient implements ClientModInitializer {
         if (rows.size() > 7) rows = rows.subList(0, 7);
         int x = RAKE_POS[0], y = RAKE_POS[1];
         int w = 180;
-        int h = 24 + Math.max(1, rows.size()) * 20 + 4;
+        int h = 24 + Math.max(1, rows.size()) * 17 + 2;
         panel(g, x, y, w, h);
         spaced(g, f, "RAKEBACK", x + 8, y + 7, TITLE);
         small(g, f, RAKE_RULE, x + w - 8 - (int) (tw(f, RAKE_RULE) * 0.7f), y + 8, MUTED);
@@ -813,16 +812,10 @@ public class BalanceHudClient implements ClientModInitializer {
         for (Map.Entry<String, Double> e : rows) {
             double loss = e.getValue();
             boolean owed = loss >= RAKE_TARGET;
-            double frac = Math.min(1.0, loss / RAKE_TARGET);
             String t = owed ? "owed " + money(loss * RAKE_PCT) : money(loss) + " / " + RAKE_LABEL;
-            rrect(g, x + 5, ry - 3, w - 10, 18, 0x30000000);                 // row card
-            tx(g, f, fit(f, e.getKey(), w - 28 - tw(f, t)), x + 10, ry, WHITE, false);
-            tx(g, f, t, x + w - 10 - tw(f, t), ry, owed ? GREEN : WHITE, false);
-            int by = ry + 11;
-            g.fill(x + 10, by, x + w - 10, by + 2, 0x28FFFFFF);
-            int bw = (int) ((w - 20) * frac);
-            if (bw > 0) g.fill(x + 10, by, x + 10 + bw, by + 2, frac >= 0.75 ? GREEN : PINK);   // green once close to the target
-            ry += 20;
+            tx(g, f, fit(f, e.getKey(), w - 24 - tw(f, t)), x + 8, ry, WHITE, false);
+            tx(g, f, t, x + w - 8 - tw(f, t), ry, owed ? GREEN : MUTED, false);
+            ry += 17;
         }
     }
 }
