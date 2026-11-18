@@ -71,14 +71,14 @@ public class BalanceHudClient implements ClientModInitializer {
     static final FontDescription FD_MED = new FontDescription.Resource(Identifier.fromNamespaceAndPath("balancehud", "hud"));
     static final FontDescription FD_BOLD = FD_MED;   // one font file only (Poppins Medium) to keep the setup short
 
-    static final boolean USE_FONT = true;   // false = use Minecraft's own font (no font files needed)
+    static final boolean USE_FONT = false;   // false = use Minecraft's own font (no font files needed)
 
     static Component fnt(String s) {
         return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_MED)) : Component.literal(s);
     }
 
     static Component fntB(String s) {
-        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_BOLD).withBold(true)) : Component.literal(s);
+        return USE_FONT ? Component.literal(s).withStyle(Style.EMPTY.withFont(FD_BOLD).withBold(true)) : Component.literal(s).withStyle(Style.EMPTY.withBold(true));
     }
 
     static int twb(Font f, String s) { return f.width(fntB(s)); }
@@ -650,7 +650,7 @@ public class BalanceHudClient implements ClientModInitializer {
         int x = PROFIT_POS[0] < 0 ? sw() - 8 - (int) (w * PROFIT_SCALE) : PROFIT_POS[0];
         int y = PROFIT_POS[1];
         begin(g, x, y, PROFIT_SCALE);
-        panel(g, x, y, w, h, 0xE513234A);   // navy
+        panel(g, x, y, w, h);
 
         if (balance >= 0) {
             String bt = "Bal " + money2(balance);
